@@ -40,6 +40,7 @@ export const migrations = [
     project_name TEXT,
     work_form TEXT NOT NULL,
     remark TEXT,
+    remark_options TEXT,
     collaborator TEXT,
     weight REAL NOT NULL DEFAULT 1,
     schedule_kind TEXT NOT NULL DEFAULT 'random',
@@ -47,8 +48,19 @@ export const migrations = [
     start_time TEXT,
     end_time TEXT,
     enabled INTEGER NOT NULL DEFAULT 1,
+    archived INTEGER NOT NULL DEFAULT 0,
     created_at TEXT NOT NULL,
     updated_at TEXT NOT NULL
+  )`,
+  `CREATE TABLE IF NOT EXISTS monthly_template_settings (
+    id TEXT PRIMARY KEY,
+    month TEXT NOT NULL,
+    template_id TEXT NOT NULL,
+    enabled INTEGER NOT NULL DEFAULT 0,
+    weight REAL NOT NULL DEFAULT 1,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL,
+    UNIQUE(month, template_id)
   )`,
   `CREATE TABLE IF NOT EXISTS time_blocks (
     id TEXT PRIMARY KEY,

@@ -1,6 +1,6 @@
 import * as echarts from "echarts";
 import { useEffect, useRef } from "react";
-import type { TimesheetEntry } from "../data/types";
+import type { TimesheetEntry, WorkTemplate } from "../data/types";
 import { durationHours } from "../lib/time";
 
 const chartPalette = ["#007aff", "#ff9500", "#af52de", "#5856d6", "#ff2d55", "#64d2ff", "#8e8e93", "#bf5af2"];
@@ -45,6 +45,8 @@ export function CategoryChart({ entries }: { entries: TimesheetEntry[] }) {
 }
 
 type BreakdownDimension = "workNature" | "workCategory" | "projectName" | "workForm";
+export type TemplateWeightDimension = "template" | "projectName" | "workNature" | "workCategory" | "workForm";
+export type TemplateWeightChartType = "bar" | "pie";
 
 const entryDimensionValue = (entry: TimesheetEntry, dimension: BreakdownDimension) => {
   if (dimension === "projectName") return entry.projectName && entry.projectName !== "备注" ? entry.projectName : "备注";
@@ -89,10 +91,24 @@ export function BreakdownPieChart({ entries, dimension }: { entries: TimesheetEn
       series: [
         {
           type: "pie",
-          radius: ["48%", "72%"],
+          radius: ["36%", "58%"],
           center: ["50%", "42%"],
           avoidLabelOverlap: true,
-          label: { show: false },
+          label: {
+            show: true,
+            color: mutedTextColor,
+            fontSize: 11,
+            lineHeight: 14,
+            overflow: "truncate",
+            width: 92,
+            formatter: ({ name, percent }: { name: string; percent: number }) => `${name}\n${percent}%`,
+          },
+          labelLine: {
+            show: true,
+            length: 12,
+            length2: 8,
+            lineStyle: { color: "rgba(142, 142, 147, 0.52)" },
+          },
           emphasis: { scale: true, scaleSize: 4 },
           itemStyle: { borderColor: "rgba(255, 255, 255, 0.9)", borderRadius: 6, borderWidth: 2 },
           data,
@@ -163,6 +179,126 @@ export function TrendBarChart({ entries, startDate, endDate }: { entries: Timesh
       chart.dispose();
     };
   }, [endDate, entries, startDate]);
+
+  return <div ref={ref} className="h-72 w-full" />;
+}
+
+const templateDimensionValue = (template: WorkTemplate, dimension: TemplateWeightDimension) => {
+  if (dimension === "template") return template.name || template.workForm || "未命名模板";
+  if (dimension === "projectName") return template.projectName && template.projectName !== "备注" ? template.projectName : "备注";
+  return template[dimension] || "未填写";
+};
+
+export function TemplateWeightChart({
+  templates,
+  dimension,
+  type,
+}: {
+  templates: WorkTemplate[];
+  dimension: TemplateWeightDimension;
+  type: TemplateWeightChartType;
+}) {
+  const ref = useRef<HTMLDivElement | null>(null);
+
+  useEffect(() => {
+    if (!ref.current) return;
+    const chart = echarts.init(ref.current);
+    const groups = new Map<string, number>();
+    templates
+      .filter((template) => template.enabled && !template.archived)
+      .forEach((template) => {
+        const key = templateDimensionValue(template, dimension);
+        groups.set(key, (groups.get(key) || 0) + Math.min(20, Math.max(1, Math.round(template.weight || 1))));
+      });
+    const data = [...groups.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .slice(0, dimension === "template" ? 20 : 14)
+      .map(([name, value]) => ({ name, value }));
+
+    if (type === "pie") {
+      chart.setOption({
+        color: chartPalette,
+        tooltip: {
+          trigger: "item",
+          formatter: ({ name, value, percent }: { name: string; value: number; percent: number }) => `${name}<br/>权重 ${value} · ${percent}%`,
+        },
+        legend: {
+          type: "scroll",
+          bottom: 0,
+          left: 8,
+          right: 8,
+          itemWidth: 8,
+          itemHeight: 8,
+          textStyle: { color: mutedTextColor, fontSize: 11 },
+        },
+        series: [
+          {
+            type: "pie",
+            radius: ["36%", "58%"],
+            center: ["50%", "42%"],
+            avoidLabelOverlap: true,
+            label: {
+              show: true,
+              color: mutedTextColor,
+              fontSize: 11,
+              lineHeight: 14,
+              overflow: "truncate",
+              width: 92,
+              formatter: ({ name, percent }: { name: string; percent: number }) => `${name}\n${percent}%`,
+            },
+            labelLine: {
+              show: true,
+              length: 12,
+              length2: 8,
+              lineStyle: { color: "rgba(142, 142, 147, 0.52)" },
+            },
+            emphasis: { scale: true, scaleSize: 4 },
+            itemStyle: { borderColor: "rgba(255, 255, 255, 0.9)", borderRadius: 6, borderWidth: 2 },
+            data,
+          },
+        ],
+      });
+    } else {
+      chart.setOption({
+        color: chartPalette,
+        grid: { left: 10, right: 10, top: 18, bottom: dimension === "template" ? 86 : 56, containLabel: true },
+        tooltip: {
+          trigger: "axis",
+          formatter: (params: Array<{ name: string; value: number }>) => {
+            const item = params[0];
+            return item ? `${item.name}<br/>权重 ${item.value}` : "";
+          },
+        },
+        xAxis: {
+          type: "category",
+          data: data.map((item) => item.name),
+          axisTick: { show: false },
+          axisLine: { lineStyle: { color: splitLineColor } },
+          axisLabel: { color: mutedTextColor, fontSize: 11, interval: 0, rotate: 40, width: 96, overflow: "truncate" },
+        },
+        yAxis: {
+          type: "value",
+          axisLabel: { color: mutedTextColor, fontSize: 11 },
+          splitLine: { lineStyle: { color: splitLineColor } },
+        },
+        series: [
+          {
+            type: "bar",
+            data: data.map((item) => item.value),
+            barMaxWidth: 28,
+            itemStyle: { color: "#007aff", borderRadius: [5, 5, 0, 0] },
+          },
+        ],
+      });
+    }
+
+    const resize = () => chart.resize();
+    window.addEventListener("resize", resize);
+    return () => {
+      window.removeEventListener("resize", resize);
+      chart.dispose();
+    };
+  }, [dimension, templates, type]);
 
   return <div ref={ref} className="h-72 w-full" />;
 }

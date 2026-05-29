@@ -47,6 +47,7 @@ export interface WorkTemplate {
   projectName?: string;
   workForm: string;
   remark?: string;
+  remarkOptions?: string[];
   collaborator?: string;
   weight: number;
   scheduleKind: TemplateKind;
@@ -54,6 +55,17 @@ export interface WorkTemplate {
   startTime?: string;
   endTime?: string;
   enabled: boolean;
+  archived?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface MonthlyTemplateSetting {
+  id: string;
+  month: string;
+  templateId: string;
+  enabled: boolean;
+  weight: number;
   createdAt: string;
   updatedAt: string;
 }
@@ -108,6 +120,7 @@ export interface WorkspaceState {
   projects: Project[];
   aliases: ProjectAlias[];
   templates: WorkTemplate[];
+  monthlyTemplateSettings: MonthlyTemplateSetting[];
   blocks: TimeBlock[];
   entries: TimesheetEntry[];
   jobs: ImportExportJob[];

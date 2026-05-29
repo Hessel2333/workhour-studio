@@ -1,4 +1,4 @@
-import type { Profile, Project, TimesheetEntry, WorkTemplate, WorkspaceState } from "./types";
+import type { MonthlyTemplateSetting, Profile, Project, TimesheetEntry, WorkTemplate, WorkspaceState } from "./types";
 
 const now = () => new Date().toISOString();
 
@@ -49,9 +49,11 @@ export const seedTemplates: WorkTemplate[] = [
     projectName: "研究院智慧信息系统建设与应用探索",
     workForm: "资料调研",
     remark: "信息化系统方案调研",
+    remarkOptions: ["信息化系统方案调研"],
     weight: 20,
     scheduleKind: "random",
     enabled: true,
+    archived: false,
     createdAt: now(),
     updatedAt: now(),
   },
@@ -63,6 +65,7 @@ export const seedTemplates: WorkTemplate[] = [
     projectName: "备注",
     workForm: "其他",
     remark: "核磁补充液氮",
+    remarkOptions: ["核磁补充液氮"],
     collaborator: "张敏",
     weight: 1,
     scheduleKind: "fixed",
@@ -70,6 +73,7 @@ export const seedTemplates: WorkTemplate[] = [
     startTime: "13:00",
     endTime: "17:00",
     enabled: true,
+    archived: false,
     createdAt: now(),
     updatedAt: now(),
   },
@@ -81,12 +85,14 @@ export const seedTemplates: WorkTemplate[] = [
     projectName: "备注",
     workForm: "基地会议",
     remark: "周末讲堂",
+    remarkOptions: ["周末讲堂"],
     weight: 1,
     scheduleKind: "weekend_lecture",
     weekday: 6,
     startTime: "09:00",
     endTime: "11:30",
     enabled: true,
+    archived: false,
     createdAt: now(),
     updatedAt: now(),
   },
@@ -110,11 +116,22 @@ export const seedEntries: TimesheetEntry[] = [
   },
 ];
 
+export const seedMonthlyTemplateSettings: MonthlyTemplateSetting[] = seedTemplates.map((template) => ({
+  id: createId("monthly_template"),
+  month: new Date().toISOString().slice(0, 7),
+  templateId: template.id,
+  enabled: template.enabled && !template.archived,
+  weight: template.weight,
+  createdAt: now(),
+  updatedAt: now(),
+}));
+
 export const createSeedState = (): WorkspaceState => ({
   profile: { ...defaultProfile },
   projects: [...seedProjects],
   aliases: [],
   templates: [...seedTemplates],
+  monthlyTemplateSettings: [...seedMonthlyTemplateSettings],
   blocks: [],
   entries: [...seedEntries],
   jobs: [],

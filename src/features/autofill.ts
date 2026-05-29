@@ -9,17 +9,26 @@ const PREFERRED_RANDOM_BLOCK = 90;
 const MAX_RANDOM_BLOCK = 120;
 
 const pickWeighted = (templates: WorkTemplate[], seed: number) => {
-  const total = templates.reduce((sum, template) => sum + Math.max(template.weight, 0.1), 0);
+  const effectiveWeight = (template: WorkTemplate) => Math.min(20, Math.max(template.weight, 1));
+  const total = templates.reduce((sum, template) => sum + effectiveWeight(template), 0);
   let cursor = (seed * 9301 + 49297) % 233280;
   let target = (cursor / 233280) * total;
   for (const template of templates) {
-    target -= Math.max(template.weight, 0.1);
+    target -= effectiveWeight(template);
     if (target <= 0) return template;
   }
   return templates[0];
 };
 
-const entryFromTemplate = (date: string, startTime: string, endTime: string, template: WorkTemplate): TimesheetEntry => ({
+const pickRemark = (template: WorkTemplate, seed: string) => {
+  const options = template.remarkOptions?.filter(Boolean) || [];
+  if (!options.length) return template.remark;
+  let hash = 0;
+  for (const char of seed) hash = (hash * 31 + char.charCodeAt(0)) % 100000;
+  return options[hash % options.length];
+};
+
+const entryFromTemplate = (date: string, startTime: string, endTime: string, template: WorkTemplate, seedSalt: number): TimesheetEntry => ({
   id: createId("draft"),
   workDate: date,
   startTime,
@@ -29,7 +38,7 @@ const entryFromTemplate = (date: string, startTime: string, endTime: string, tem
   projectId: template.projectId,
   projectName: template.projectName,
   workForm: template.workForm,
-  remark: template.remark,
+  remark: pickRemark(template, `${date}-${startTime}-${endTime}-${template.id}-${seedSalt}`),
   collaborator: template.collaborator,
   status: "draft",
   source: "autofill",
@@ -84,16 +93,16 @@ const splitRandomRange = (start: number, end: number) => {
   return blocks;
 };
 
-export function generateAutofillDrafts(month: string, profile: Profile, templates: WorkTemplate[], entries: TimesheetEntry[]) {
+export function generateAutofillDrafts(month: string, profile: Profile, templates: WorkTemplate[], entries: TimesheetEntry[], seedSalt = 0) {
   const randomTemplates = templates.filter((template) => template.enabled && template.scheduleKind === "random");
   const fixedTemplates = templates.filter((template) => template.enabled && template.scheduleKind !== "random");
-  if (randomTemplates.length === 0) return [];
+  if (randomTemplates.length === 0 && fixedTemplates.length === 0) return [];
 
   const drafts: TimesheetEntry[] = [];
   for (let day = 1; day <= daysInMonth(month); day += 1) {
     const workDate = dateForMonthDay(month, day);
     const weekday = getWeekday(workDate);
-    const dayEntries = entries.filter((entry) => entry.workDate === workDate && entry.status === "confirmed");
+    const dayEntries = entries.filter((entry) => entry.workDate === workDate);
     const isWeekend = weekday >= 6;
     const weekendTemplate = fixedTemplates.find((template) => template.scheduleKind === "weekend_lecture" && weekday === 6);
     const dayStart = isWeekend && weekendTemplate ? weekendTemplate.startTime || "09:00" : profile.defaultStart;
@@ -101,7 +110,7 @@ export function generateAutofillDrafts(month: string, profile: Profile, template
 
     if (weekendTemplate && isWeekend) {
       findFreeRanges(toMinutes(dayStart), toMinutes(dayEnd), dayEntries, profile, false).forEach((range) => {
-        drafts.push(entryFromTemplate(workDate, fromMinutes(range.start), fromMinutes(range.end), weekendTemplate));
+        drafts.push(entryFromTemplate(workDate, fromMinutes(range.start), fromMinutes(range.end), weekendTemplate, seedSalt));
       });
       continue;
     }
@@ -117,15 +126,16 @@ export function generateAutofillDrafts(month: string, profile: Profile, template
       const end = Math.min(toMinutes(dayEnd), toMinutes(template.endTime || dayEnd));
       if (end <= start) return;
       findFreeRanges(start, end, dayEntries, profile, true).forEach((range) => {
-        drafts.push(entryFromTemplate(workDate, fromMinutes(range.start), fromMinutes(range.end), template));
+        drafts.push(entryFromTemplate(workDate, fromMinutes(range.start), fromMinutes(range.end), template, seedSalt));
       });
     });
 
     const occupiedWithFixed = [...dayEntries, ...drafts.filter((entry) => entry.workDate === workDate)];
+    if (randomTemplates.length === 0) continue;
     findFreeRanges(toMinutes(dayStart), toMinutes(dayEnd), occupiedWithFixed, profile, true).forEach((range) => {
       splitRandomRange(range.start, range.end).forEach((block, index) => {
-        const template = pickWeighted(randomTemplates, day * 1000 + block.start + index);
-        drafts.push(entryFromTemplate(workDate, fromMinutes(block.start), fromMinutes(block.end), template));
+        const template = pickWeighted(randomTemplates, seedSalt + day * 1000 + block.start + index);
+        drafts.push(entryFromTemplate(workDate, fromMinutes(block.start), fromMinutes(block.end), template, seedSalt));
       });
     });
   }

@@ -102,11 +102,19 @@ const indexByHeader = (header: unknown[], labels: string[]) => {
   });
 };
 
-const templateKey = (template: Pick<WorkTemplate, "workNature" | "workCategory" | "projectName" | "workForm" | "remark" | "scheduleKind">) =>
-  [template.workNature, template.workCategory, template.projectName || "", template.workForm, template.remark || "", template.scheduleKind].join("\u0001");
+const templateKey = (template: Pick<WorkTemplate, "workNature" | "workCategory" | "projectName" | "workForm" | "scheduleKind">) =>
+  [template.workNature, template.workCategory, template.projectName || "", template.workForm, template.scheduleKind].join("\u0001");
+
+const normalizeRemarkOptions = (values: Array<string | undefined>) =>
+  [...new Set(values.map((value) => text(value)).filter(Boolean))].slice(0, 12);
+
+const projectRequiredCategories = new Set(["总部项目", "公司项目", "院控项目", "创新创效", "探索项目", "其他科研生产"]);
+const requiresProject = (workCategory: string) => projectRequiredCategories.has(workCategory);
+const hasLinkedProject = (projectName?: string) => Boolean(projectName && projectName !== "备注");
 
 const pushTemplate = (templates: Map<string, WorkTemplate>, template: Omit<WorkTemplate, "id" | "createdAt" | "updatedAt">) => {
   if (!template.workNature || !template.workCategory || !template.workForm) return;
+  if (requiresProject(template.workCategory) && !hasLinkedProject(template.projectName)) return;
   const next: WorkTemplate = {
     id: createId("template_xlsx"),
     ...template,
@@ -174,7 +182,7 @@ const importMenuTemplates = (workbook: XLSX.WorkBook) => {
         collaborator: "",
         weight: 1,
         scheduleKind: "random",
-        enabled: true,
+        enabled: false,
       });
     }
   });
@@ -184,13 +192,14 @@ const importMenuTemplates = (workbook: XLSX.WorkBook) => {
 
 const importHistoryTemplates = (entries: TimesheetEntry[], projects: Project[]) => {
   const projectByName = new Map(projects.map((project) => [project.name, project]));
-  const templates = new Map<string, WorkTemplate>();
+  const templates = new Map<string, { template: WorkTemplate; count: number; remarks: Map<string, number> }>();
 
   entries.forEach((entry) => {
     const project = entry.projectName && entry.projectName !== "备注" ? projectByName.get(entry.projectName) : undefined;
     if (entry.projectName && entry.projectName !== "备注" && !project) return;
     const workCategory = project ? project.category : entry.workCategory;
     const projectName = project?.name || "备注";
+    if (requiresProject(workCategory) && !hasLinkedProject(projectName)) return;
     const template: WorkTemplate = {
       id: createId("template_xlsx"),
       name: projectName !== "备注" ? `${projectName} / ${entry.workForm}` : `${entry.workCategory} / ${entry.workForm}`,
@@ -199,24 +208,40 @@ const importHistoryTemplates = (entries: TimesheetEntry[], projects: Project[]) 
       projectName,
       workForm: entry.workForm,
       remark: "",
+      remarkOptions: normalizeRemarkOptions([entry.remark]),
       collaborator: "",
-      weight: Math.max(1, Math.round(durationHours(entry.startTime, entry.endTime))),
+      weight: 1,
       scheduleKind: "random",
-      enabled: true,
+      enabled: false,
       createdAt: now(),
       updatedAt: now(),
     };
     const key = templateKey(template);
     const current = templates.get(key);
+    const remark = text(entry.remark);
     if (current) {
-      current.weight += template.weight;
-      current.updatedAt = now();
+      current.count += 1;
+      if (remark) current.remarks.set(remark, (current.remarks.get(remark) || 0) + 1);
+      current.template.updatedAt = now();
     } else {
-      templates.set(key, template);
+      const remarks = new Map<string, number>();
+      if (remark) remarks.set(remark, 1);
+      templates.set(key, { template, count: 1, remarks });
     }
   });
 
-  return [...templates.values()];
+  return [...templates.values()].map(({ template, count, remarks }) => {
+    const remarkOptions = [...remarks.entries()]
+      .sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0]))
+      .map(([remark]) => remark)
+      .slice(0, 12);
+    return {
+      ...template,
+      remark: remarkOptions[0] || undefined,
+      remarkOptions,
+      weight: Math.min(20, Math.max(1, Math.round(Math.log2(count + 1) * 4))),
+    };
+  });
 };
 
 export async function importExcelWorkbook(file: File): Promise<ImportResult> {
@@ -326,6 +351,7 @@ export async function importConfigJson(file: File): Promise<ImportResult> {
       projectName: item.关联项目 || item.内容属性 || "备注",
       workForm: item.工作形式 || "其他",
       remark: item.备注 || "",
+      remarkOptions: normalizeRemarkOptions([item.备注]),
       collaborator: item.共同完成人 || "",
       weight: Number(item.权重 || 1),
       scheduleKind: "random",
@@ -345,6 +371,7 @@ export async function importConfigJson(file: File): Promise<ImportResult> {
       projectName: item.关联项目 || item.内容属性 || "备注",
       workForm: item.工作形式 || "其他",
       remark: item.备注 || "",
+      remarkOptions: normalizeRemarkOptions([item.备注]),
       collaborator: item.共同完成人 || "",
       weight: 1,
       scheduleKind: "fixed",
@@ -367,6 +394,7 @@ export async function importConfigJson(file: File): Promise<ImportResult> {
       projectName: item.关联项目 || item.内容属性 || "备注",
       workForm: item.工作形式 || "基地会议",
       remark: item.备注 || "周末讲堂",
+      remarkOptions: normalizeRemarkOptions([item.备注 || "周末讲堂"]),
       collaborator: item.共同完成人 || "",
       weight: 1,
       scheduleKind: "weekend_lecture",
@@ -379,17 +407,18 @@ export async function importConfigJson(file: File): Promise<ImportResult> {
     });
   }
 
+  const usableTemplates = templates.filter((template) => !requiresProject(template.workCategory) || hasLinkedProject(template.projectName));
   const jobs: ImportExportJob[] = [
     {
       id: createId("job"),
       kind: "json_import",
       fileName: file.name,
       status: "success",
-      summary: `导入 ${templates.length} 个模板`,
+      summary: `导入 ${usableTemplates.length} 个模板`,
       createdAt: now(),
     },
   ];
-  return { templates, jobs, summary: jobs[0].summary || "" };
+  return { templates: usableTemplates, jobs, summary: jobs[0].summary || "" };
 }
 
 export function exportMonthExcel(entries: TimesheetEntry[], month: string) {

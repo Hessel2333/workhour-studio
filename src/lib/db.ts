@@ -3,6 +3,7 @@ import { createSeedState, defaultProfile } from "../data/defaults";
 import { migrations } from "../data/migrations";
 import type {
   ImportExportJob,
+  MonthlyTemplateSetting,
   Profile,
   Project,
   ProjectAlias,
@@ -19,6 +20,16 @@ const STORAGE_KEY = "workhour-studio.workspace";
 let sqlDb: SqlDb | null | undefined;
 
 const now = () => new Date().toISOString();
+
+function parseStringArray(value: unknown) {
+  if (!value) return undefined;
+  try {
+    const parsed = JSON.parse(String(value));
+    return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : undefined;
+  } catch {
+    return undefined;
+  }
+}
 
 async function hasColumn(db: SqlDb, table: string, column: string) {
   const rows = await db.select<Array<{ name?: string }>>(`PRAGMA table_info(${table})`);
@@ -61,6 +72,7 @@ const mapTemplate = (row: Record<string, unknown>): WorkTemplate => ({
   projectName: row.project_name ? String(row.project_name) : undefined,
   workForm: String(row.work_form),
   remark: row.remark ? String(row.remark) : undefined,
+  remarkOptions: parseStringArray(row.remark_options),
   collaborator: row.collaborator ? String(row.collaborator) : undefined,
   weight: Number(row.weight || 1),
   scheduleKind: (row.schedule_kind as WorkTemplate["scheduleKind"]) || "random",
@@ -68,6 +80,17 @@ const mapTemplate = (row: Record<string, unknown>): WorkTemplate => ({
   startTime: row.start_time ? String(row.start_time) : undefined,
   endTime: row.end_time ? String(row.end_time) : undefined,
   enabled: Boolean(row.enabled),
+  archived: Boolean(row.archived),
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+});
+
+const mapMonthlyTemplateSetting = (row: Record<string, unknown>): MonthlyTemplateSetting => ({
+  id: String(row.id),
+  month: String(row.month),
+  templateId: String(row.template_id),
+  enabled: Boolean(row.enabled),
+  weight: Number(row.weight || 1),
   createdAt: String(row.created_at),
   updatedAt: String(row.updated_at),
 });
@@ -138,6 +161,12 @@ async function getSqlDb() {
     for (const migration of migrations) {
       await sqlDb.execute(migration);
     }
+    if (!(await hasColumn(sqlDb, "work_templates", "remark_options"))) {
+      await sqlDb.execute("ALTER TABLE work_templates ADD COLUMN remark_options TEXT");
+    }
+    if (!(await hasColumn(sqlDb, "work_templates", "archived"))) {
+      await sqlDb.execute("ALTER TABLE work_templates ADD COLUMN archived INTEGER NOT NULL DEFAULT 0");
+    }
     return sqlDb;
   } catch (error) {
     console.warn("SQLite unavailable, using browser storage fallback.", error);
@@ -167,11 +196,12 @@ export async function loadWorkspace(): Promise<WorkspaceState> {
     await upsertProfile(defaultProfile);
   }
 
-  const [profiles, projects, aliases, templates, blocks, entries, jobs] = await Promise.all([
+  const [profiles, projects, aliases, templates, monthlyTemplateSettings, blocks, entries, jobs] = await Promise.all([
     db.select<Record<string, unknown>[]>("SELECT * FROM profiles LIMIT 1"),
     db.select<Record<string, unknown>[]>("SELECT * FROM projects ORDER BY is_favorite DESC, updated_at DESC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM project_aliases ORDER BY created_at DESC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM work_templates ORDER BY enabled DESC, schedule_kind, updated_at DESC"),
+    db.select<Record<string, unknown>[]>("SELECT * FROM monthly_template_settings ORDER BY month DESC, updated_at DESC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM time_blocks ORDER BY work_date DESC, start_time ASC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM timesheet_entries ORDER BY work_date DESC, start_time ASC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM import_exports ORDER BY created_at DESC LIMIT 100"),
@@ -182,6 +212,7 @@ export async function loadWorkspace(): Promise<WorkspaceState> {
     projects: projects.map(mapProject),
     aliases: aliases.map(mapAlias),
     templates: templates.map(mapTemplate),
+    monthlyTemplateSettings: monthlyTemplateSettings.map(mapMonthlyTemplateSetting),
     blocks: blocks.map(mapBlock),
     entries: entries.map(mapEntry),
     jobs: jobs.map(mapJob),
@@ -198,6 +229,7 @@ export async function replaceWorkspace(state: WorkspaceState) {
   await db.execute("DELETE FROM project_aliases");
   await db.execute("DELETE FROM time_blocks");
   await db.execute("DELETE FROM timesheet_entries");
+  await db.execute("DELETE FROM monthly_template_settings");
   await db.execute("DELETE FROM work_templates");
   await db.execute("DELETE FROM projects");
   await db.execute("DELETE FROM import_exports");
@@ -207,6 +239,7 @@ export async function replaceWorkspace(state: WorkspaceState) {
   await Promise.all(state.projects.map(upsertProject));
   await Promise.all(state.aliases.map(upsertAlias));
   await Promise.all(state.templates.map(upsertTemplate));
+  await Promise.all((state.monthlyTemplateSettings || []).map(upsertMonthlyTemplateSetting));
   await Promise.all(state.blocks.map(upsertBlock));
   await Promise.all(state.entries.map(upsertEntry));
   await Promise.all(state.jobs.map(upsertJob));
@@ -231,6 +264,10 @@ export async function saveStatePatch(patch: Partial<WorkspaceState>, current: Wo
   if (patch.templates) {
     await db.execute("DELETE FROM work_templates");
     await Promise.all(patch.templates.map(upsertTemplate));
+  }
+  if (patch.monthlyTemplateSettings) {
+    await db.execute("DELETE FROM monthly_template_settings");
+    await Promise.all(patch.monthlyTemplateSettings.map(upsertMonthlyTemplateSetting));
   }
   if (patch.blocks) {
     await db.execute("DELETE FROM time_blocks");
@@ -315,8 +352,8 @@ export async function upsertTemplate(template: WorkTemplate) {
   if (!db) return;
   await db.execute(
     `INSERT OR REPLACE INTO work_templates
-     (id, name, work_nature, work_category, project_id, project_name, work_form, remark, collaborator, weight, schedule_kind, weekday, start_time, end_time, enabled, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+     (id, name, work_nature, work_category, project_id, project_name, work_form, remark, remark_options, collaborator, weight, schedule_kind, weekday, start_time, end_time, enabled, archived, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       template.id,
       template.name,
@@ -326,6 +363,7 @@ export async function upsertTemplate(template: WorkTemplate) {
       template.projectName ?? null,
       template.workForm,
       template.remark ?? null,
+      template.remarkOptions?.length ? JSON.stringify(template.remarkOptions) : null,
       template.collaborator ?? null,
       template.weight,
       template.scheduleKind,
@@ -333,8 +371,28 @@ export async function upsertTemplate(template: WorkTemplate) {
       template.startTime ?? null,
       template.endTime ?? null,
       template.enabled ? 1 : 0,
+      template.archived ? 1 : 0,
       template.createdAt || now(),
       template.updatedAt || now(),
+    ],
+  );
+}
+
+export async function upsertMonthlyTemplateSetting(setting: MonthlyTemplateSetting) {
+  const db = await getSqlDb();
+  if (!db) return;
+  await db.execute(
+    `INSERT OR REPLACE INTO monthly_template_settings
+     (id, month, template_id, enabled, weight, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?)`,
+    [
+      setting.id,
+      setting.month,
+      setting.templateId,
+      setting.enabled ? 1 : 0,
+      setting.weight,
+      setting.createdAt || now(),
+      setting.updatedAt || now(),
     ],
   );
 }

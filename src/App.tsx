@@ -24,8 +24,9 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { type ChangeEvent, useEffect, useRef, useState } from "react";
-import { BreakdownPieChart, CategoryChart, TrendBarChart } from "./components/Chart";
+import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
+import { BreakdownPieChart, CategoryChart, TemplateWeightChart, TrendBarChart } from "./components/Chart";
 import { Badge } from "./components/ui/Badge";
 import { Button } from "./components/ui/Button";
 import { Card, CardHeader } from "./components/ui/Card";
@@ -34,7 +35,7 @@ import { Field, Input, Select, Textarea } from "./components/ui/Form";
 import { GuideDocs } from "./components/GuideDocs";
 import { PageHeader } from "./components/ui/PageHeader";
 import { createId } from "./data/defaults";
-import type { PageKey, Project, ThemeMode, TimesheetEntry, WorkTemplate, WorkspaceState } from "./data/types";
+import type { MonthlyTemplateSetting, PageKey, Project, ThemeMode, TimesheetEntry, WorkTemplate, WorkspaceState } from "./data/types";
 import { generateAutofillDrafts } from "./features/autofill";
 import { exportMonthExcel, importConfigJson, importExcelWorkbook, mergeContinuousEntries } from "./features/excel";
 import { loadWorkspace, saveStatePatch } from "./lib/db";
@@ -78,6 +79,7 @@ const workFormOptionsByNature: Record<string, string[]> = {
 };
 const workCategoryOptions = [...new Set(Object.values(workCategoryOptionsByNature).flat())];
 const workFormOptions = [...new Set(Object.values(workFormOptionsByNature).flat())];
+const projectRequiredCategories = new Set(["总部项目", "公司项目", "院控项目", "创新创效", "探索项目", "其他科研生产"]);
 const importedProjectPurgeKey = "workhour-studio.imported-projects-purged-v1";
 const templateLibraryResetKey = "workhour-studio.template-library-reset-v1";
 const stale2025CleanupKey = "workhour-studio.stale-2025-cleanup-v1";
@@ -104,6 +106,8 @@ type ConfirmRequest = {
 const getWorkCategoryOptions = (workNature: string) => workCategoryOptionsByNature[workNature] || workCategoryOptions;
 const getWorkFormOptions = (workNature: string) => workFormOptionsByNature[workNature] || workFormOptions;
 const withCurrentOption = (options: string[], current?: string) => current && !options.includes(current) ? [current, ...options] : options;
+const clampTemplateWeight = (weight: number) => Math.min(20, Math.max(1, Math.round(Number.isFinite(weight) ? weight : 10)));
+const requiresLinkedProject = (workCategory: string) => projectRequiredCategories.has(workCategory);
 const legacyTransactionalNature = "\u975e\u79d1\u7814\u5de5\u4f5c";
 const normalizeWorkNatureValue = (value: string) => value === legacyTransactionalNature ? "事务性工作" : value || "事务性工作";
 
@@ -136,8 +140,68 @@ function projectExists(projects: Project[], projectName?: string) {
   return projects.some((project) => project.name === projectName);
 }
 
-function getAutofillTemplates(state: WorkspaceState) {
-  return state.templates.map((template) => projectExists(state.projects, template.projectName) ? template : { ...template, projectName: "备注", projectId: undefined });
+function isTemplateAllowed(template: Pick<WorkTemplate, "workCategory" | "projectName">, projects: Project[]) {
+  if (!requiresLinkedProject(template.workCategory)) return true;
+  return Boolean(template.projectName && template.projectName !== "备注" && projectExists(projects, template.projectName));
+}
+
+const isCommonTemplate = (template: Pick<WorkTemplate, "enabled" | "archived">) => template.enabled && !template.archived;
+
+const normalizeRemarkOptions = (template: Pick<WorkTemplate, "remark" | "remarkOptions">) =>
+  [...new Set([...(template.remarkOptions || []), template.remark || ""].map((item) => item.trim()).filter(Boolean))].slice(0, 12);
+
+const templateSignature = (template: Pick<WorkTemplate, "workNature" | "workCategory" | "projectName" | "workForm" | "scheduleKind">) =>
+  [template.workNature, template.workCategory, template.projectName || "", template.workForm, template.scheduleKind].join("\u0001");
+
+function createMonthlyTemplateSetting(month: string, template: WorkTemplate, patch: Partial<MonthlyTemplateSetting> = {}): MonthlyTemplateSetting {
+  return {
+    id: patch.id || createId("monthly_template"),
+    month,
+    templateId: template.id,
+    enabled: patch.enabled ?? isCommonTemplate(template),
+    weight: clampTemplateWeight(patch.weight ?? template.weight),
+    createdAt: patch.createdAt || now(),
+    updatedAt: patch.updatedAt || now(),
+  };
+}
+
+function getMonthTemplateSettings(state: WorkspaceState, month: string) {
+  const settings = (state.monthlyTemplateSettings || []).filter((setting) => setting.month === month);
+  if (settings.length) return settings;
+  const templateIds = new Set(state.templates.map((template) => template.id));
+  const previousMonth = [...new Set((state.monthlyTemplateSettings || [])
+    .filter((setting) => setting.month < month && templateIds.has(setting.templateId))
+    .map((setting) => setting.month))]
+    .sort()
+    .at(-1);
+  if (previousMonth) {
+    return (state.monthlyTemplateSettings || [])
+      .filter((setting) => setting.month === previousMonth && templateIds.has(setting.templateId))
+      .map((setting) => ({
+        ...setting,
+        id: createId("monthly_template"),
+        month,
+        createdAt: now(),
+        updatedAt: now(),
+      }));
+  }
+  return state.templates.map((template) => createMonthlyTemplateSetting(month, template));
+}
+
+function applyMonthSettings(templates: WorkTemplate[], settings: MonthlyTemplateSetting[]) {
+  const settingsByTemplate = new Map(settings.map((setting) => [setting.templateId, setting]));
+  return templates.map((template) => {
+    const setting = settingsByTemplate.get(template.id);
+    return setting ? { ...template, enabled: setting.enabled, weight: clampTemplateWeight(setting.weight) } : template;
+  });
+}
+
+function getAutofillTemplates(state: WorkspaceState, month: string) {
+  const templates = applyMonthSettings(state.templates, getMonthTemplateSettings(state, month));
+  return templates
+    .filter(isCommonTemplate)
+    .filter((template) => isTemplateAllowed(template, state.projects))
+    .map((template) => projectExists(state.projects, template.projectName) ? template : { ...template, projectName: "备注", projectId: undefined });
 }
 
 function sanitizeWorkspaceData(workspace: WorkspaceState) {
@@ -149,27 +213,55 @@ function sanitizeWorkspaceData(workspace: WorkspaceState) {
       workNature: normalizeWorkNatureValue(entry.workNature),
       projectName: entry.status === "draft" || entry.source === "autofill" ? normalizeProjectName(entry.projectName) : entry.projectName,
     }));
-  const normalizedTemplates = workspace.templates.map((template) => ({
-    ...template,
-    workNature: normalizeWorkNatureValue(template.workNature),
-    projectName: normalizeProjectName(template.projectName),
-    projectId: projectExists(workspace.projects, template.projectName) ? template.projectId : undefined,
-  }));
+  const normalizedTemplates = workspace.templates
+    .map((template) => ({
+      ...template,
+      workNature: normalizeWorkNatureValue(template.workNature),
+      remarkOptions: normalizeRemarkOptions(template),
+      projectName: normalizeProjectName(template.projectName),
+      projectId: projectExists(workspace.projects, template.projectName) ? template.projectId : undefined,
+      weight: clampTemplateWeight(template.weight),
+      enabled: Boolean(template.enabled),
+      archived: Boolean(template.archived),
+    }))
+    .filter((template) => isTemplateAllowed(template, workspace.projects));
   const normalizedBlocks = workspace.blocks.filter((block) => block.workDate >= "2026-01-01");
   const normalizedJobs = workspace.jobs.filter((job) => !job.periodEnd || job.periodEnd >= "2026-01");
+  const templateIds = new Set(normalizedTemplates.map((template) => template.id));
+  const normalizedMonthlyTemplateSettings = (workspace.monthlyTemplateSettings || [])
+    .filter((setting) => templateIds.has(setting.templateId))
+    .map((setting) => ({
+      ...setting,
+      enabled: Boolean(setting.enabled),
+      weight: clampTemplateWeight(setting.weight),
+    }));
 
   const changed =
+    !(workspace.monthlyTemplateSettings) ||
     normalizedEntries.length !== workspace.entries.length ||
     normalizedEntries.some((entry, index) => entry.workNature !== workspace.entries[index]?.workNature || entry.projectName !== workspace.entries[index]?.projectName) ||
-    normalizedTemplates.some((template, index) => template.workNature !== workspace.templates[index]?.workNature || template.projectName !== workspace.templates[index]?.projectName || template.projectId !== workspace.templates[index]?.projectId) ||
+    normalizedTemplates.length !== workspace.templates.length ||
+    normalizedTemplates.some((template, index) =>
+      template.workNature !== workspace.templates[index]?.workNature ||
+      template.projectName !== workspace.templates[index]?.projectName ||
+      template.projectId !== workspace.templates[index]?.projectId ||
+      template.weight !== clampTemplateWeight(workspace.templates[index]?.weight || 10) ||
+      template.enabled !== Boolean(workspace.templates[index]?.enabled) ||
+      template.archived !== Boolean(workspace.templates[index]?.archived) ||
+      (template.remarkOptions || []).join("\u0001") !== (workspace.templates[index]?.remarkOptions || []).join("\u0001")) ||
     normalizedBlocks.length !== workspace.blocks.length ||
-    normalizedJobs.length !== workspace.jobs.length;
+    normalizedJobs.length !== workspace.jobs.length ||
+    normalizedMonthlyTemplateSettings.length !== (workspace.monthlyTemplateSettings || []).length ||
+    normalizedMonthlyTemplateSettings.some((setting, index) =>
+      setting.enabled !== Boolean((workspace.monthlyTemplateSettings || [])[index]?.enabled) ||
+      setting.weight !== clampTemplateWeight((workspace.monthlyTemplateSettings || [])[index]?.weight || 10));
 
   return {
     changed,
     patch: {
       entries: normalizedEntries,
       templates: normalizedTemplates,
+      monthlyTemplateSettings: normalizedMonthlyTemplateSettings,
       blocks: normalizedBlocks,
       jobs: normalizedJobs,
     } satisfies Partial<WorkspaceState>,
@@ -307,12 +399,11 @@ function App() {
     const dates = scope === "week" ? getWeekDates(scheduleDate) : [scheduleDate];
     const dateSet = new Set(dates);
     const months = [...new Set(dates.map((date) => date.slice(0, 7)))];
-    const templates = getAutofillTemplates(state);
+    const seedSalt = Date.now() % 1_000_000;
     const drafts = months
-      .flatMap((item) => generateAutofillDrafts(item, state.profile, templates, state.entries))
+      .flatMap((item) => generateAutofillDrafts(item, state.profile, getAutofillTemplates(state, item), state.entries, seedSalt))
       .filter((entry) => dateSet.has(entry.workDate));
-    const entries = state.entries.filter((entry) => !(entry.status === "draft" && dateSet.has(entry.workDate)));
-    await saveScheduleEntries([...entries, ...drafts], scope === "week" ? `已为本周生成 ${drafts.length} 条草稿` : `已为 ${scheduleDate} 生成草稿`);
+    await saveScheduleEntries([...state.entries, ...drafts], scope === "week" ? `已为本周补全 ${drafts.length} 条缺失草稿` : `已为 ${scheduleDate} 补全 ${drafts.length} 条缺失草稿`);
   };
 
   if (!state) {
@@ -326,28 +417,29 @@ function App() {
     );
   }
 
-  const pageProps = { state, month, save, setNotice, confirmAction, scheduleMode, setScheduleMode, scheduleDate, setScheduleDate };
+  const pageProps = { state, month, save, saveScheduleEntries, setNotice, confirmAction, scheduleMode, setScheduleMode, scheduleDate, setScheduleDate };
   const currentPage = pages.find((item) => item.key === page);
 
   return (
     <div className="app-grid">
       <aside className="sidebar-shell hidden px-3 py-4 md:flex md:flex-col">
-        <div className="mb-6 flex flex-col gap-2 px-2 pb-3">
+        <div className="sidebar-brand mb-6 px-2 pb-3">
           <div className="brand-mark text-white"><Clock3 className="size-3.5" /></div>
           <div>
-            <div className="text-base font-bold tracking-[-0.03em] text-ink">工时</div>
-            <div className="text-xs leading-5 text-muted">任务与记录</div>
+            <div className="text-base font-bold tracking-[-0.03em] text-ink">Workhour Studio</div>
           </div>
         </div>
         <nav className="space-y-1.5">
           {pages.filter((item) => item.key !== "guide").map((item) => (
             <button key={item.key} onClick={() => setPage(item.key)} aria-current={page === item.key ? "page" : undefined} className={cn("nav-item w-full", page === item.key && "active")}>
+              <item.icon className="nav-item-icon" />
               {item.label}
             </button>
           ))}
         </nav>
         <div className="mt-auto space-y-1.5 px-1 pb-3">
           <button onClick={() => setPage("guide")} aria-current={page === "guide" ? "page" : undefined} className={cn("nav-item w-full", page === "guide" && "active")}>
+            <BookOpen className="nav-item-icon" />
             说明
           </button>
         </div>
@@ -359,39 +451,39 @@ function App() {
       </aside>
 
       <main className="workspace-shell min-w-0">
-        <header className="main-toolbar sticky top-0 z-20 px-4 py-3 md:px-5">
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <div className="flex items-center gap-4">
-              <div className="hidden items-center gap-2 md:flex" aria-hidden="true">
-                <span className="traffic-light close" />
-                <span className="traffic-light minimize" />
-                <span className="traffic-light expand" />
-              </div>
+        <header className="main-toolbar sticky top-0 z-20">
+          <div className="titlebar-inner">
+            <div className="titlebar-leading">
               <div className="flex items-center gap-2 md:hidden">
                 <Clock3 className="size-5 text-accent" />
-                <span className="text-sm font-semibold">{currentPage?.label}</span>
+                <span className="titlebar-title">{currentPage?.label}</span>
               </div>
               <div className="hidden md:block">
-                <div className="text-sm font-bold tracking-[-0.02em] text-ink">{currentPage?.label}</div>
+                <div className="titlebar-title">{currentPage?.label}</div>
               </div>
             </div>
-            {page === "schedule" ? (
-              <ScheduleTitleToolbar
-                mode={scheduleMode}
-                selectedDate={scheduleDate}
-                onModeChange={setScheduleMode}
-                onDateChange={setScheduleDate}
-                canUndo={Boolean(scheduleUndoEntries)}
-                onUndo={undoScheduleAction}
-                onCopyPreviousDay={copyPreviousDay}
-                onGenerateDrafts={generateScheduleDrafts}
-                onDeleteDay={deleteScheduleDay}
-              />
-            ) : ["dashboard", "timesheet", "importExport"].includes(page) ? (
-              <div className="pill-control p-1">
-                <Input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className="h-8 w-36 border-0 bg-white/90 text-center shadow-sm dark:bg-white/10" />
+            <div className="titlebar-actions">
+              <div className="titlebar-system-actions">
+                {page === "schedule" ? (
+                  <ScheduleTitleToolbar
+                    mode={scheduleMode}
+                    selectedDate={scheduleDate}
+                    onModeChange={setScheduleMode}
+                    onDateChange={setScheduleDate}
+                    canUndo={Boolean(scheduleUndoEntries)}
+                    onUndo={undoScheduleAction}
+                    onCopyPreviousDay={copyPreviousDay}
+                    onGenerateDrafts={generateScheduleDrafts}
+                    onDeleteDay={deleteScheduleDay}
+                  />
+                ) : ["dashboard", "timesheet", "importExport"].includes(page) ? (
+                  <div className="pill-control p-1">
+                    <Input type="month" value={month} onChange={(event) => setMonth(event.target.value)} className="h-8 w-36 border-0 bg-white/90 text-center shadow-sm dark:bg-white/10" />
+                  </div>
+                ) : null}
               </div>
-            ) : <div />}
+              <div id="page-titlebar-actions" className="titlebar-page-actions" />
+            </div>
           </div>
         </header>
 
@@ -489,28 +581,104 @@ function ScheduleTitleToolbar({
   const [autofillScope, setAutofillScope] = useState<"day" | "week">("day");
 
   return (
-    <div className="title-schedule-toolbar">
-      <button className="toolbar-month-chip">{selectedDate.slice(0, 7).replace("-", "年")}月</button>
-      <div className="toolbar-segmented">
-        <button className={cn(mode === "day" && "active")} onClick={() => onModeChange("day")}>日视图</button>
-        <button className={cn(mode === "week" && "active")} onClick={() => onModeChange("week")}>周视图</button>
+    <div className="title-schedule-toolbar schedule-title-toolbar">
+      <div className="schedule-toolbar-left">
+        <button className="toolbar-month-chip">{selectedDate.slice(0, 7).replace("-", "年")}月</button>
+        <div className="toolbar-segmented">
+          <button className={cn(mode === "day" && "active")} onClick={() => onModeChange("day")}>日视图</button>
+          <button className={cn(mode === "week" && "active")} onClick={() => onModeChange("week")}>周视图</button>
+        </div>
       </div>
-      <div className="toolbar-date-nav">
+      <div className="toolbar-date-nav schedule-period-nav">
         <button className="toolbar-icon-button" onClick={() => onDateChange(shiftDate(selectedDate, mode === "week" ? -7 : -1))} aria-label={mode === "week" ? "上一周" : "上一天"}><ChevronLeft className="size-4" /></button>
         <Input type="date" value={selectedDate} onChange={(event) => onDateChange(event.target.value)} />
         <button className="toolbar-icon-button" onClick={() => onDateChange(shiftDate(selectedDate, mode === "week" ? 7 : 1))} aria-label={mode === "week" ? "下一周" : "下一天"}><ChevronRight className="size-4" /></button>
       </div>
-      <button className="toolbar-soft-button" disabled={!canUndo} onClick={onUndo}>撤销</button>
-      <button className="toolbar-soft-button" onClick={onCopyPreviousDay}>复制昨日</button>
-      <div className="toolbar-autofill-control">
-        <button className="toolbar-soft-button" onClick={() => onGenerateDrafts(autofillScope)}>自动补全</button>
-        <select value={autofillScope} onChange={(event) => setAutofillScope(event.target.value as "day" | "week")} aria-label="自动补全范围">
-          <option value="day">补全当日</option>
-          <option value="week">补全本周</option>
-        </select>
+      <div className="schedule-toolbar-right">
+        <button className="toolbar-soft-button" disabled={!canUndo} onClick={onUndo}>撤销</button>
+        <button className="toolbar-soft-button" onClick={onCopyPreviousDay}>复制昨日</button>
+        <div className="toolbar-autofill-control">
+          <button className="toolbar-soft-button" onClick={() => onGenerateDrafts(autofillScope)}>自动补全</button>
+          <select value={autofillScope} onChange={(event) => setAutofillScope(event.target.value as "day" | "week")} aria-label="自动补全范围">
+            <option value="day">补全当日</option>
+            <option value="week">补全本周</option>
+          </select>
+        </div>
+        <button className="toolbar-soft-button" onClick={() => onDateChange(new Date().toISOString().slice(0, 10))}>回到本周</button>
+        <button className="toolbar-danger-button" onClick={onDeleteDay}>删除当日</button>
       </div>
-      <button className="toolbar-soft-button" onClick={() => onDateChange(new Date().toISOString().slice(0, 10))}>回到本周</button>
-      <button className="toolbar-danger-button" onClick={onDeleteDay}>删除当日</button>
+    </div>
+  );
+}
+
+type AnalyticsGranularity = "week" | "month" | "quarter" | "year";
+
+function shiftMonth(date: string, diffMonths: number) {
+  const next = new Date(`${date}T00:00:00`);
+  next.setMonth(next.getMonth() + diffMonths);
+  return toIsoDate(next);
+}
+
+function shiftYear(date: string, diffYears: number) {
+  const next = new Date(`${date}T00:00:00`);
+  next.setFullYear(next.getFullYear() + diffYears);
+  return toIsoDate(next);
+}
+
+function analyticsPeriod(date: string, granularity: AnalyticsGranularity) {
+  const current = new Date(`${date}T00:00:00`);
+  const year = current.getFullYear();
+  const month = current.getMonth();
+  if (granularity === "week") {
+    const dates = getWeekDates(date);
+    return { start: dates[0], end: dates[6], label: `${dates[0].slice(5).replace("-", "/")} - ${dates[6].slice(5).replace("-", "/")}` };
+  }
+  if (granularity === "month") {
+    const key = monthKey(current);
+    return { start: `${key}-01`, end: dateForMonthDay(key, daysInMonth(key)), label: `${year}年${month + 1}月` };
+  }
+  if (granularity === "quarter") {
+    const quarter = Math.floor(month / 3);
+    const startMonth = quarter * 3;
+    const startKey = `${year}-${String(startMonth + 1).padStart(2, "0")}`;
+    const endKey = `${year}-${String(startMonth + 3).padStart(2, "0")}`;
+    return { start: `${startKey}-01`, end: dateForMonthDay(endKey, daysInMonth(endKey)), label: `${year}年第 ${quarter + 1} 季度` };
+  }
+  return { start: `${year}-01-01`, end: `${year}-12-31`, label: `${year}年` };
+}
+
+function shiftAnalyticsAnchor(date: string, granularity: AnalyticsGranularity, direction: -1 | 1) {
+  if (granularity === "week") return shiftDate(date, direction * 7);
+  if (granularity === "month") return shiftMonth(date, direction);
+  if (granularity === "quarter") return shiftMonth(date, direction * 3);
+  return shiftYear(date, direction);
+}
+
+function AnalyticsTitleToolbar({
+  granularity,
+  anchorDate,
+  onGranularityChange,
+  onAnchorDateChange,
+}: {
+  granularity: AnalyticsGranularity;
+  anchorDate: string;
+  onGranularityChange: (granularity: AnalyticsGranularity) => void;
+  onAnchorDateChange: (date: string) => void;
+}) {
+  const period = analyticsPeriod(anchorDate, granularity);
+  return (
+    <div className="title-schedule-toolbar analytics-title-toolbar">
+      <div className="toolbar-date-nav analytics-period-nav">
+        <button className="toolbar-icon-button" onClick={() => onAnchorDateChange(shiftAnalyticsAnchor(anchorDate, granularity, -1))} aria-label="上一段"><ChevronLeft className="size-4" /></button>
+        <div className="toolbar-period-label">{period.label}</div>
+        <button className="toolbar-icon-button" onClick={() => onAnchorDateChange(shiftAnalyticsAnchor(anchorDate, granularity, 1))} aria-label="下一段"><ChevronRight className="size-4" /></button>
+      </div>
+      <div className="toolbar-segmented analytics-granularity">
+        <button className={cn(granularity === "week" && "active")} onClick={() => onGranularityChange("week")}>周</button>
+        <button className={cn(granularity === "month" && "active")} onClick={() => onGranularityChange("month")}>月</button>
+        <button className={cn(granularity === "quarter" && "active")} onClick={() => onGranularityChange("quarter")}>季度</button>
+        <button className={cn(granularity === "year" && "active")} onClick={() => onGranularityChange("year")}>年</button>
+      </div>
     </div>
   );
 }
@@ -535,6 +703,7 @@ type PageProps = {
   scheduleDate: string;
   setScheduleDate: (date: string) => void;
   save: (patch: Partial<WorkspaceState>, message?: string) => Promise<void>;
+  saveScheduleEntries: (entries: TimesheetEntry[], message: string) => Promise<void>;
   setNotice: (value: string) => void;
   confirmAction: (request: ConfirmRequest) => void;
 };
@@ -550,9 +719,8 @@ function Dashboard({ state, month, save }: PageProps) {
   const todayEntries = state.entries.filter((entry) => entry.workDate === today).sort((a, b) => a.startTime.localeCompare(b.startTime));
 
   const createDrafts = async () => {
-    const generated = generateAutofillDrafts(month, state.profile, getAutofillTemplates(state), state.entries);
-    const withoutOldDrafts = state.entries.filter((entry) => !(entry.status === "draft" && entry.workDate.startsWith(month)));
-    await save({ entries: [...withoutOldDrafts, ...generated] }, `已生成 ${generated.length} 条补全草稿`);
+    const generated = generateAutofillDrafts(month, state.profile, getAutofillTemplates(state, month), state.entries, Date.now() % 1_000_000);
+    await save({ entries: [...state.entries, ...generated] }, `已补全 ${generated.length} 条缺失草稿`);
   };
 
   const confirmDrafts = async () => {
@@ -635,20 +803,22 @@ function ProjectSelect({
   value,
   projects,
   workCategory,
+  required = false,
   onChange,
 }: {
   value?: string;
   projects: Project[];
   workCategory: string;
+  required?: boolean;
   onChange: (value: string) => void;
 }) {
   const options = getProjectOptions(projects, workCategory);
-  const normalizedValue = value || "备注";
-  const keepsCurrentValue = normalizedValue !== "备注" && !options.some((project) => project.name === normalizedValue);
+  const normalizedValue = required ? value || "" : value || "备注";
+  const keepsCurrentValue = Boolean(normalizedValue) && normalizedValue !== "备注" && !options.some((project) => project.name === normalizedValue);
 
   return (
     <Select value={normalizedValue} onChange={(event) => onChange(event.target.value)}>
-      <option value="备注">备注 / 不关联项目</option>
+      {required ? <option value="">选择项目</option> : <option value="备注">备注 / 不关联项目</option>}
       {keepsCurrentValue ? <option value={normalizedValue}>{normalizedValue}</option> : null}
       {options.map((project) => (
         <option key={project.id} value={project.name}>{project.name}</option>
@@ -723,6 +893,18 @@ type ScheduleInteraction =
       nextMinute: number;
     };
 
+type SchedulePaletteDrag =
+  | { kind: "project"; id: string }
+  | { kind: "template"; id: string };
+
+type ScheduleDropPreview = {
+  date: string;
+  kind: SchedulePaletteDrag["kind"];
+  id: string;
+  startMinute: number;
+  endMinute: number;
+};
+
 const snapMinuteFromRect = (clientY: number, rect: DOMRect) => {
   const ratio = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
   const minute = weekTimelineStart + ratio * (weekTimelineEnd - weekTimelineStart);
@@ -735,7 +917,19 @@ const clampInteractiveRange = (startMinute: number, endMinute: number) => {
   return { start, end };
 };
 
-function SchedulePage({ state, month, save, confirmAction, scheduleMode: mode, scheduleDate: selectedDate, setScheduleDate: setSelectedDate }: PageProps) {
+const createScheduleDragPreview = (title: string, badge: string) => {
+  const preview = document.createElement("div");
+  const chip = document.createElement("span");
+  const label = document.createElement("strong");
+  preview.className = "worktrail-drag-preview";
+  chip.textContent = badge;
+  label.textContent = title;
+  preview.append(chip, label);
+  document.body.append(preview);
+  return preview;
+};
+
+function SchedulePage({ state, month, save, saveScheduleEntries, confirmAction, scheduleMode: mode, scheduleDate: selectedDate, setScheduleDate: setSelectedDate }: PageProps) {
   const dayEntries = state.entries.filter((entry) => entry.workDate === selectedDate).sort((a, b) => a.startTime.localeCompare(b.startTime));
   const slots = [];
   for (let minute = toMinutes(state.profile.defaultStart); minute < toMinutes(state.profile.defaultEnd); minute += 30) {
@@ -748,7 +942,7 @@ function SchedulePage({ state, month, save, confirmAction, scheduleMode: mode, s
   return (
     <>
       <PageHeader title="日程" description="按日或按周维护时间块，生成并确认补全草稿。" />
-      {mode === "week" ? <WeekSchedule state={state} selectedDate={selectedDate} onSelectDate={setSelectedDate} save={save} confirmAction={confirmAction} /> : (
+      {mode === "week" ? <WeekSchedule state={state} selectedDate={selectedDate} onSelectDate={setSelectedDate} saveScheduleEntries={saveScheduleEntries} confirmAction={confirmAction} /> : (
         <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
           <Card className="p-4">
             <Field label="日期"><Input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} /></Field>
@@ -785,18 +979,21 @@ function WeekSchedule({
   state,
   selectedDate,
   onSelectDate,
-  save,
+  saveScheduleEntries,
   confirmAction,
 }: {
   state: WorkspaceState;
   selectedDate: string;
   onSelectDate: (date: string) => void;
-  save: (patch: Partial<WorkspaceState>, message?: string) => Promise<void>;
+  saveScheduleEntries: (entries: TimesheetEntry[], message: string) => Promise<void>;
   confirmAction: (request: ConfirmRequest) => void;
 }) {
   const suppressClickUntilRef = useRef(0);
   const interactionRef = useRef<ScheduleInteraction | null>(null);
+  const dragPreviewRef = useRef<HTMLElement | null>(null);
   const [interaction, setInteraction] = useState<ScheduleInteraction | null>(null);
+  const [draggingPaletteItem, setDraggingPaletteItem] = useState<SchedulePaletteDrag | null>(null);
+  const [dropPreview, setDropPreview] = useState<ScheduleDropPreview | null>(null);
   const [selectedEntryId, setSelectedEntryId] = useState<string | null>(null);
   const weekDates = getWeekDates(selectedDate);
   const today = new Date().toISOString().slice(0, 10);
@@ -805,15 +1002,39 @@ function WeekSchedule({
   const weekEntries = state.entries.filter((entry) => weekDates.includes(entry.workDate)).sort((a, b) => `${a.workDate} ${a.startTime}`.localeCompare(`${b.workDate} ${b.startTime}`));
   const entriesByDate = new Map(weekDates.map((date) => [date, weekEntries.filter((entry) => entry.workDate === date)]));
   const favoriteProjects = state.projects.filter((project) => project.isFavorite).slice(0, 3);
-  const quickTemplates = state.templates.filter((template) => template.enabled).slice(0, 3);
+  const quickTemplates = getAutofillTemplates(state, selectedDate.slice(0, 7)).slice(0, 3);
   const selectedEntry = selectedEntryId ? state.entries.find((entry) => entry.id === selectedEntryId) : undefined;
+  const movingPreview = (() => {
+    if (!interaction || interaction.type !== "move" || !interaction.hasDragged) return undefined;
+    const entry = weekEntries.find((item) => item.id === interaction.entryId);
+    if (!entry) return undefined;
+    const range = clampInteractiveRange(interaction.nextStart, interaction.nextStart + interaction.duration);
+    return { ...entry, workDate: interaction.date, startTime: fromMinutes(range.start), endTime: fromMinutes(range.end) };
+  })();
 
   useEffect(() => {
     interactionRef.current = interaction;
   }, [interaction]);
 
+  useEffect(() => {
+    const clearDragState = () => {
+      setDraggingPaletteItem(null);
+      setDropPreview(null);
+      dragPreviewRef.current?.remove();
+      dragPreviewRef.current = null;
+    };
+
+    window.addEventListener("dragend", clearDragState);
+    window.addEventListener("drop", clearDragState);
+    return () => {
+      window.removeEventListener("dragend", clearDragState);
+      window.removeEventListener("drop", clearDragState);
+      clearDragState();
+    };
+  }, []);
+
   const updateEntry = async (id: string, patch: Partial<TimesheetEntry>, message = "时间块已更新") => {
-    await save({ entries: state.entries.map((entry) => (entry.id === id ? { ...entry, ...patch, updatedAt: now() } : entry)) }, message);
+    await saveScheduleEntries(state.entries.map((entry) => (entry.id === id ? { ...entry, ...patch, updatedAt: now() } : entry)), message);
   };
 
   const deleteEntry = (entry: TimesheetEntry) => {
@@ -823,9 +1044,83 @@ function WeekSchedule({
       confirmText: "删除",
       onConfirm: async () => {
         setSelectedEntryId(null);
-        await save({ entries: state.entries.filter((item) => item.id !== entry.id) }, "时间块已删除");
+        await saveScheduleEntries(state.entries.filter((item) => item.id !== entry.id), "时间块已删除");
       },
     });
+  };
+
+  const getPaletteItem = (item: SchedulePaletteDrag) => {
+    if (item.kind === "project") {
+      const project = state.projects.find((entry) => entry.id === item.id);
+      if (!project) return undefined;
+      const normalized = normalizeWorkSelection({
+        workNature: "科研工作",
+        workCategory: project.category,
+        workForm: getWorkFormOptions("科研工作")[0] || "资料调研",
+        projectName: project.name,
+      }, {}, state.projects);
+      return {
+        ...item,
+        title: project.name,
+        badge: project.code || project.category,
+        duration: 60,
+        entryPatch: {
+          workNature: normalized.workNature,
+          workCategory: normalized.workCategory,
+          projectId: project.id,
+          projectName: project.name,
+          workForm: normalized.workForm,
+          remark: project.name,
+          source: "manual" as const,
+        },
+      };
+    }
+
+    const template = state.templates.find((entry) => entry.id === item.id);
+    if (!template) return undefined;
+    const duration = template.startTime && template.endTime
+      ? Math.max(minInteractiveBlockMinutes, toMinutes(template.endTime) - toMinutes(template.startTime))
+      : 60;
+    return {
+      ...item,
+      title: template.remark || template.name,
+      badge: template.projectName && template.projectName !== "备注" ? template.projectName : template.workCategory,
+      duration,
+      entryPatch: {
+        workNature: template.workNature,
+        workCategory: template.workCategory,
+        projectId: template.projectId,
+        projectName: template.projectName || "备注",
+        workForm: template.workForm,
+        remark: template.remark || template.name,
+        collaborator: template.collaborator,
+        source: "template" as const,
+      },
+    };
+  };
+
+  const readPaletteDrag = (event: DragEvent<HTMLElement>): SchedulePaletteDrag | null => {
+    const kind = (draggingPaletteItem?.kind || event.dataTransfer.getData("worktrail-kind")) as SchedulePaletteDrag["kind"] | "";
+    const id = draggingPaletteItem?.id || event.dataTransfer.getData("worktrail-id");
+    return (kind === "project" || kind === "template") && id ? { kind, id } : null;
+  };
+
+  const createEntryFromDrop = async (item: SchedulePaletteDrag, date: string, minute: number) => {
+    const paletteItem = getPaletteItem(item);
+    if (!paletteItem) return;
+    const range = clampInteractiveRange(minute, minute + paletteItem.duration);
+    const entry: TimesheetEntry = {
+      id: createId("entry"),
+      workDate: date,
+      startTime: fromMinutes(range.start),
+      endTime: fromMinutes(range.end),
+      status: "confirmed",
+      createdAt: now(),
+      updatedAt: now(),
+      ...paletteItem.entryPatch,
+    };
+    await saveScheduleEntries(mergeContinuousEntries([entry, ...state.entries]), "已排入日程");
+    onSelectDate(date);
   };
 
   useEffect(() => {
@@ -887,10 +1182,6 @@ function WeekSchedule({
 
   const previewEntry = (entry: TimesheetEntry) => {
     if (!interaction || interaction.entryId !== entry.id) return entry;
-    if (interaction.type === "move" && interaction.hasDragged) {
-      const range = clampInteractiveRange(interaction.nextStart, interaction.nextStart + interaction.duration);
-      return { ...entry, workDate: interaction.date, startTime: fromMinutes(range.start), endTime: fromMinutes(range.end) };
-    }
     if (interaction.type === "resize-start" || interaction.type === "resize-end") {
       const range = interaction.type === "resize-start"
         ? clampInteractiveRange(Math.min(interaction.nextMinute, interaction.endMinute - minInteractiveBlockMinutes), interaction.endMinute)
@@ -906,7 +1197,26 @@ function WeekSchedule({
         <div className="worktrail-rail-title">工作项</div>
         <div className="worktrail-stack">
           {favoriteProjects.map((project) => (
-            <div key={project.id} className="worktrail-palette-card">
+            <div
+              key={project.id}
+              className={cn("worktrail-palette-card", draggingPaletteItem?.kind === "project" && draggingPaletteItem.id === project.id && "dragging")}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData("worktrail-kind", "project");
+                event.dataTransfer.setData("worktrail-id", project.id);
+                event.dataTransfer.effectAllowed = "copy";
+                dragPreviewRef.current?.remove();
+                dragPreviewRef.current = createScheduleDragPreview(project.name, project.code || project.category);
+                event.dataTransfer.setDragImage(dragPreviewRef.current, 22, 22);
+                setDraggingPaletteItem({ kind: "project", id: project.id });
+              }}
+              onDragEnd={() => {
+                setDraggingPaletteItem(null);
+                setDropPreview(null);
+                dragPreviewRef.current?.remove();
+                dragPreviewRef.current = null;
+              }}
+            >
               <div className="worktrail-card-head">
                 <span className="worktrail-chip" style={{ ["--project-color" as string]: projectColorPalette[stableIndex(project.name, projectColorPalette.length)] }}>{project.code || project.category}</span>
                 <span>{project.status === "active" ? "进行中" : project.status === "paused" ? "暂停" : "已结束"}</span>
@@ -918,7 +1228,30 @@ function WeekSchedule({
         </div>
         <div className="worktrail-rail-title secondary">其他</div>
         <div className="worktrail-stack">
-          {quickTemplates.map((template) => <div key={template.id} className="worktrail-quick-card"><strong>{template.remark || template.name}</strong><span>{template.workNature} · {template.workForm}</span></div>)}
+          {quickTemplates.map((template) => (
+            <div
+              key={template.id}
+              className={cn("worktrail-quick-card", draggingPaletteItem?.kind === "template" && draggingPaletteItem.id === template.id && "dragging")}
+              draggable
+              onDragStart={(event) => {
+                event.dataTransfer.setData("worktrail-kind", "template");
+                event.dataTransfer.setData("worktrail-id", template.id);
+                event.dataTransfer.effectAllowed = "copy";
+                dragPreviewRef.current?.remove();
+                dragPreviewRef.current = createScheduleDragPreview(template.remark || template.name, template.projectName || template.workCategory);
+                event.dataTransfer.setDragImage(dragPreviewRef.current, 22, 22);
+                setDraggingPaletteItem({ kind: "template", id: template.id });
+              }}
+              onDragEnd={() => {
+                setDraggingPaletteItem(null);
+                setDropPreview(null);
+                dragPreviewRef.current?.remove();
+                dragPreviewRef.current = null;
+              }}
+            >
+              <strong>{template.remark || template.name}</strong><span>{template.workNature} · {template.workForm}</span>
+            </div>
+          ))}
         </div>
       </aside>
       <div className="worktrail-board">
@@ -937,7 +1270,41 @@ function WeekSchedule({
               return (
                 <section key={date} className={cn("worktrail-day-column", date === selectedDate && "selected")}>
                   <button className={cn("worktrail-day-header", date === selectedDate && "selected", date === today && "today")} onClick={() => onSelectDate(date)}><strong>{formatDayHeader(date)}</strong></button>
-                  <div className={cn("worktrail-day-body", date === today && "today")} data-week-day-body="true" data-date={date} style={{ height: ((weekTimelineEnd - weekTimelineStart) / 30) * weekSlotHeight }}>
+                  <div
+                    className={cn("worktrail-day-body", date === today && "today", dropPreview?.date === date && "drop-target")}
+                    data-week-day-body="true"
+                    data-date={date}
+                    style={{ height: ((weekTimelineEnd - weekTimelineStart) / 30) * weekSlotHeight }}
+                    onDragOver={(event) => {
+                      const item = readPaletteDrag(event);
+                      if (!item) return;
+                      const paletteItem = getPaletteItem(item);
+                      if (!paletteItem) return;
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "copy";
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const startMinute = snapMinuteFromRect(event.clientY, rect);
+                      const range = clampInteractiveRange(startMinute, startMinute + paletteItem.duration);
+                      setDropPreview({ date, kind: item.kind, id: item.id, startMinute: range.start, endMinute: range.end });
+                    }}
+                    onDragLeave={(event) => {
+                      const nextTarget = event.relatedTarget as Node | null;
+                      if (nextTarget && event.currentTarget.contains(nextTarget)) return;
+                      setDropPreview((current) => (current?.date === date ? null : current));
+                    }}
+                    onDrop={(event) => {
+                      const item = readPaletteDrag(event);
+                      if (!item) return;
+                      event.preventDefault();
+                      const rect = event.currentTarget.getBoundingClientRect();
+                      const startMinute = snapMinuteFromRect(event.clientY, rect);
+                      setDraggingPaletteItem(null);
+                      setDropPreview(null);
+                      dragPreviewRef.current?.remove();
+                      dragPreviewRef.current = null;
+                      void createEntryFromDrop(item, date, startMinute);
+                    }}
+                  >
                     {timeSlots.map((minute) => <div key={minute} className={cn("worktrail-slot", minute % 60 === 0 ? "major" : "minor", minute >= 8 * 60 && minute < 18 * 60 && "within-workday")} style={{ height: weekSlotHeight }} />)}
                     {entries.map((entry) => {
                       const rendered = previewEntry(entry);
@@ -950,7 +1317,13 @@ function WeekSchedule({
                       return (
                         <article
                           key={entry.id}
-                          className={cn("worktrail-time-block interactive", rendered.status === "draft" && "draft", selectedEntryId === entry.id && "selected", interaction?.entryId === entry.id && "interacting")}
+                          className={cn(
+                            "worktrail-time-block interactive",
+                            rendered.status === "draft" && "draft",
+                            selectedEntryId === entry.id && "selected",
+                            interaction?.entryId === entry.id && "interacting",
+                            interaction?.type === "move" && interaction.entryId === entry.id && interaction.hasDragged && "drag-origin",
+                          )}
                           style={{ top, height, ["--block-color" as string]: getEntryProjectColor(rendered), ["--nature-color" as string]: getNatureColor(rendered.workNature) }}
                           onClick={(event) => {
                             event.stopPropagation();
@@ -1021,6 +1394,41 @@ function WeekSchedule({
                         </article>
                       );
                     })}
+                    {dropPreview?.date === date ? (() => {
+                      const paletteItem = getPaletteItem(dropPreview);
+                      return paletteItem ? (
+                        <div
+                          className="worktrail-drop-preview"
+                          style={{
+                            top: ((dropPreview.startMinute - weekTimelineStart) / 30) * weekSlotHeight,
+                            height: ((dropPreview.endMinute - dropPreview.startMinute) / 30) * weekSlotHeight,
+                            ["--block-color" as string]: dropPreview.kind === "project"
+                              ? projectColorPalette[stableIndex(paletteItem.title, projectColorPalette.length)]
+                              : projectColorPalette[stableIndex(paletteItem.badge, projectColorPalette.length)],
+                          }}
+                        >
+                          <strong>{paletteItem.title}</strong>
+                          <span>{fromMinutes(dropPreview.startMinute)} - {fromMinutes(dropPreview.endMinute)}</span>
+                          <span className="worktrail-duration">{((dropPreview.endMinute - dropPreview.startMinute) / 60).toFixed(1)}</span>
+                        </div>
+                      ) : null;
+                    })() : null}
+                    {movingPreview?.workDate === date ? (
+                      <div
+                        className="worktrail-move-preview"
+                        style={{
+                          top: ((toMinutes(movingPreview.startTime) - weekTimelineStart) / 30) * weekSlotHeight,
+                          height: ((toMinutes(movingPreview.endTime) - toMinutes(movingPreview.startTime)) / 30) * weekSlotHeight,
+                          ["--block-color" as string]: getEntryProjectColor(movingPreview),
+                          ["--nature-color" as string]: getNatureColor(movingPreview.workNature),
+                        }}
+                      >
+                        <strong>{movingPreview.projectName && movingPreview.projectName !== "备注" ? movingPreview.projectName : movingPreview.remark || movingPreview.workCategory}</strong>
+                        <div className="worktrail-type-row"><span className="worktrail-type-dot" /><span>{movingPreview.workNature} · {movingPreview.workForm}</span></div>
+                        <span>{movingPreview.startTime} - {movingPreview.endTime}</span>
+                        <span className="worktrail-duration">{durationHours(movingPreview.startTime, movingPreview.endTime).toFixed(1)}</span>
+                      </div>
+                    ) : null}
                   </div>
                 </section>
               );
@@ -1197,61 +1605,77 @@ function ProjectsPage({ state, save, confirmAction }: PageProps) {
 
 function TemplatesPage({ state, save, confirmAction }: PageProps) {
   const [draft, setDraft] = useState({ name: "", workNature: "科研工作", workCategory: "探索项目", projectName: "", workForm: "资料调研", remark: "", weight: 10, scheduleKind: "random" as WorkTemplate["scheduleKind"], weekday: 1, startTime: "08:00", endTime: "09:00" });
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [groupBy, setGroupBy] = useState<"kind" | "nature" | "project">("nature");
-  const isEditing = Boolean(editingId);
-  const templateGroups = groupTemplates(state.templates, groupBy);
+  const [editingTemplate, setEditingTemplate] = useState<WorkTemplate | null>(null);
+  const [groupBy, setGroupBy] = useState<"kind" | "nature" | "project">("project");
+  const [templateView, setTemplateView] = useState<"common" | "all" | "add">("common");
+  const [commonTemplateMode, setCommonTemplateMode] = useState<"cards" | "charts">("cards");
+  const [formError, setFormError] = useState("");
+  const commonTemplates = state.templates.filter(isCommonTemplate);
+  const visibleTemplates = templateView === "common" ? commonTemplates : state.templates;
+  const templateGroups = groupTemplates(visibleTemplates, groupBy);
+  const totalWeight = commonTemplates.reduce((sum, template) => sum + clampTemplateWeight(template.weight), 0);
+  const projectRequired = requiresLinkedProject(draft.workCategory);
 
   const resetDraft = () => {
-    setEditingId(null);
+    setFormError("");
     setDraft({ name: "", workNature: "科研工作", workCategory: "探索项目", projectName: "", workForm: "资料调研", remark: "", weight: 10, scheduleKind: "random", weekday: 1, startTime: "08:00", endTime: "09:00" });
   };
-  const startEditTemplate = (template: WorkTemplate) => {
-    setEditingId(template.id);
-    setDraft({
-      name: template.name,
-      workNature: template.workNature,
-      workCategory: template.workCategory,
-      projectName: template.projectName || "",
-      workForm: template.workForm,
-      remark: template.remark || "",
-      weight: template.weight,
-      scheduleKind: template.scheduleKind,
-      weekday: template.weekday || 1,
-      startTime: template.startTime || "08:00",
-      endTime: template.endTime || "09:00",
-    });
+  const startEditTemplate = (template: WorkTemplate) => setEditingTemplate(template);
+  const remarkOptions = [...new Set(draft.remark.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))].slice(0, 12);
+  const templateFromDraft = (id = createId("template")): WorkTemplate => {
+    const projectName = draft.projectName || "备注";
+    const name = draft.name || (projectName !== "备注" ? `${projectName} / ${draft.workForm}` : `${draft.workCategory} / ${draft.workForm}`);
+    return {
+      id,
+      name,
+      workNature: draft.workNature,
+      workCategory: draft.workCategory,
+      projectName,
+      workForm: draft.workForm,
+      remark: remarkOptions[0],
+      remarkOptions,
+      weight: clampTemplateWeight(draft.weight),
+      scheduleKind: draft.scheduleKind,
+      weekday: draft.scheduleKind === "random" ? undefined : Number(draft.weekday),
+      startTime: draft.scheduleKind === "random" ? undefined : draft.startTime,
+      endTime: draft.scheduleKind === "random" ? undefined : draft.endTime,
+      enabled: true,
+      archived: false,
+      createdAt: now(),
+      updatedAt: now(),
+    };
   };
-  const templateFromDraft = (id = createId("template")): WorkTemplate => ({
-    id,
-    name: draft.name || draft.remark || draft.projectName || draft.workForm || "工作模板",
-    workNature: draft.workNature,
-    workCategory: draft.workCategory,
-    projectName: draft.projectName || "备注",
-    workForm: draft.workForm,
-    remark: draft.remark || undefined,
-    weight: Number(draft.weight) || 1,
-    scheduleKind: draft.scheduleKind,
-    weekday: draft.scheduleKind === "random" ? undefined : Number(draft.weekday),
-    startTime: draft.scheduleKind === "random" ? undefined : draft.startTime,
-    endTime: draft.scheduleKind === "random" ? undefined : draft.endTime,
-    enabled: true,
-    createdAt: now(),
-    updatedAt: now(),
-  });
+  const validateTemplate = () => {
+    if (projectRequired && (!draft.projectName || draft.projectName === "备注" || !projectExists(state.projects, draft.projectName))) {
+      setFormError("这个工作类别必须选择项目库中的具体项目。");
+      return false;
+    }
+    setFormError("");
+    return true;
+  };
   const addTemplate = async () => {
+    if (!validateTemplate()) return;
     const template = templateFromDraft();
     await save({ templates: [template, ...state.templates] }, "模板已保存");
     resetDraft();
+    setTemplateView("common");
   };
-  const saveTemplate = async () => {
-    if (!editingId) return;
-    const original = state.templates.find((template) => template.id === editingId);
-    const next = templateFromDraft(editingId.startsWith("template_xlsx_") ? createId("template") : editingId);
-    await save({ templates: state.templates.map((template) => template.id === editingId ? { ...next, enabled: original?.enabled ?? true, createdAt: original?.createdAt || next.createdAt, updatedAt: now() } : template) }, "模板已更新");
-    resetDraft();
+  const saveEditedTemplate = async (next: WorkTemplate) => {
+    if (!editingTemplate) return;
+    const replacement: WorkTemplate = {
+      ...next,
+      id: editingTemplate.id.startsWith("template_xlsx_") ? createId("template") : editingTemplate.id,
+      enabled: editingTemplate.enabled,
+      archived: editingTemplate.archived ?? false,
+      createdAt: editingTemplate.createdAt || next.createdAt,
+      updatedAt: now(),
+    };
+    await save({ templates: state.templates.map((template) => template.id === editingTemplate.id ? replacement : template) }, "模板已更新");
+    setEditingTemplate(null);
   };
-  const toggleTemplate = (template: WorkTemplate) => save({ templates: state.templates.map((item) => item.id === template.id ? { ...item, enabled: !item.enabled, updatedAt: now() } : item) });
+  const setTemplateCommon = (template: WorkTemplate, enabled: boolean) => save({ templates: state.templates.map((item) => item.id === template.id ? { ...item, enabled, archived: false, updatedAt: now() } : item) }, enabled ? "已加入常用模板" : "已从常用模板移出");
+  const archiveTemplate = (template: WorkTemplate) => save({ templates: state.templates.map((item) => item.id === template.id ? { ...item, enabled: false, archived: true, updatedAt: now() } : item) }, "模板已归档");
+  const restoreTemplate = (template: WorkTemplate) => save({ templates: state.templates.map((item) => item.id === template.id ? { ...item, archived: false, updatedAt: now() } : item) }, "模板已恢复");
   const removeTemplate = (template: WorkTemplate) => {
     confirmAction({
       title: "删除模板？",
@@ -1259,7 +1683,7 @@ function TemplatesPage({ state, save, confirmAction }: PageProps) {
       confirmText: "删除",
       onConfirm: async () => {
         await save({ templates: state.templates.filter((item) => item.id !== template.id) }, "模板已删除");
-        if (editingId === template.id) resetDraft();
+        if (editingTemplate?.id === template.id) setEditingTemplate(null);
       },
     });
   };
@@ -1274,67 +1698,279 @@ function TemplatesPage({ state, save, confirmAction }: PageProps) {
       },
     });
   };
+  const pauseCommonTemplates = () => {
+    if (!commonTemplates.length) return;
+    confirmAction({
+      title: "全部移出常用？",
+      text: `${commonTemplates.length} 个模板会保留在全部模板中，但不再作为常用模板参与自动补全。`,
+      confirmText: "移出常用",
+      onConfirm: async () => {
+        await save({ templates: state.templates.map((template) => isCommonTemplate(template) ? { ...template, enabled: false, updatedAt: now() } : template) }, "已全部移出常用");
+      },
+    });
+  };
 
-  return (
-    <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
-      <Card className="p-5">
-        <div className="grid gap-4">
-          <div><div className="text-base font-semibold text-ink">{isEditing ? "编辑模板" : "新增模板"}</div><div className="mt-1 text-sm text-muted">模板用于自动补全草稿。</div></div>
-          <Field label="模板名称"><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：资料调研" /></Field>
-          <div className="grid grid-cols-2 gap-3"><Field label="工作性质"><Select value={draft.workNature} onChange={(e) => setDraft(normalizeWorkSelection(draft, { workNature: e.target.value }, state.projects))}>{withCurrentOption(workNatureOptions, draft.workNature).map((item) => <option key={item}>{item}</option>)}</Select></Field><Field label="工作类别"><Select value={draft.workCategory} onChange={(e) => setDraft(normalizeWorkSelection(draft, { workCategory: e.target.value }, state.projects))}>{withCurrentOption(getWorkCategoryOptions(draft.workNature), draft.workCategory).map((item) => <option key={item}>{item}</option>)}</Select></Field></div>
-          <Field label="关联项目"><ProjectSelect value={draft.projectName} projects={state.projects} workCategory={draft.workCategory} onChange={(projectName) => setDraft({ ...draft, projectName })} /></Field>
-          <div className="grid grid-cols-2 gap-3"><Field label="工作形式"><Select value={draft.workForm} onChange={(e) => setDraft(normalizeWorkSelection(draft, { workForm: e.target.value }, state.projects))}>{withCurrentOption(getWorkFormOptions(draft.workNature), draft.workForm).map((item) => <option key={item}>{item}</option>)}</Select></Field><Field label="权重"><Input type="number" value={draft.weight} onChange={(e) => setDraft({ ...draft, weight: Number(e.target.value) })} /></Field></div>
-          <Field label="备注"><Textarea value={draft.remark} onChange={(e) => setDraft({ ...draft, remark: e.target.value })} /></Field>
-          <Field label="类型"><Select value={draft.scheduleKind} onChange={(e) => setDraft({ ...draft, scheduleKind: e.target.value as WorkTemplate["scheduleKind"] })}><option value="random">随机模板</option><option value="fixed">固定安排</option><option value="weekend_lecture">周末讲堂</option></Select></Field>
-          {draft.scheduleKind !== "random" ? <div className="grid grid-cols-3 gap-3"><Field label="周几"><Input type="number" min={1} max={7} value={draft.weekday} onChange={(e) => setDraft({ ...draft, weekday: Number(e.target.value) })} /></Field><Field label="开始"><Input type="time" value={draft.startTime} onChange={(e) => setDraft({ ...draft, startTime: e.target.value })} /></Field><Field label="结束"><Input type="time" value={draft.endTime} onChange={(e) => setDraft({ ...draft, endTime: e.target.value })} /></Field></div> : null}
-          <div className="flex gap-2">
-            <Button variant="primary" onClick={isEditing ? saveTemplate : addTemplate}><Plus className="size-4" />{isEditing ? "保存模板" : "新增模板"}</Button>
-            {isEditing ? <Button variant="ghost" onClick={resetDraft}>取消</Button> : null}
+  const renderGroupSwitch = () => (
+    <div className="toolbar-segmented compact template-group-switch" role="group" aria-label="模板分组方式">
+      <button className={cn(groupBy === "project" && "active")} onClick={() => setGroupBy("project")} type="button">按项目</button>
+      <button className={cn(groupBy === "nature" && "active")} onClick={() => setGroupBy("nature")} type="button">按性质</button>
+      <button className={cn(groupBy === "kind" && "active")} onClick={() => setGroupBy("kind")} type="button">按类型</button>
+    </div>
+  );
+
+  const renderTemplateList = (showToolbar = true) => (
+    <>
+      {showToolbar ? (
+        <div className="template-toolbar">
+          <div />
+          <div className="template-toolbar-actions">
+            {renderGroupSwitch()}
+            {templateView === "common" ? <Button variant="ghost" disabled={commonTemplates.length === 0} onClick={pauseCommonTemplates}>全部移出常用</Button> : null}
+            {templateView === "all" ? <Button variant="danger" disabled={state.templates.length === 0} onClick={clearTemplates}>清空全部</Button> : null}
           </div>
         </div>
-      </Card>
-      <Card>
-        <CardHeader
-          title="模板库"
-          action={
-            <div className="flex flex-wrap items-center gap-2">
-              <Select value={groupBy} onChange={(event) => setGroupBy(event.target.value as "kind" | "nature" | "project")} className="h-8 w-32">
-                <option value="nature">按性质</option>
-                <option value="kind">按类型</option>
-                <option value="project">按项目</option>
-              </Select>
-              <Button variant="danger" disabled={state.templates.length === 0} onClick={clearTemplates}>清空</Button>
-            </div>
-          }
+      ) : null}
+      {templateGroups.map((group) => (
+        <section key={group.name} className="template-group">
+          <div className="template-group-head"><span>{group.name}</span><Badge tone="gray">{group.items.length}</Badge></div>
+          <div className="template-card-grid">
+            {group.items.map((template) => (
+              <article key={template.id} className={cn("template-mini-card", !isCommonTemplate(template) && "disabled", template.archived && "archived")}>
+                <div className="template-mini-top">
+                  <strong>{template.name}</strong>
+                  <Badge tone={template.archived ? "amber" : isCommonTemplate(template) ? "blue" : "gray"}>{template.archived ? "已归档" : isCommonTemplate(template) ? "常用补全" : "仅保留"}</Badge>
+                </div>
+                <div className="template-mini-top compact">
+                  <Badge tone={template.scheduleKind === "random" ? "blue" : template.scheduleKind === "fixed" ? "gray" : "amber"}>{template.scheduleKind === "random" ? "随机" : template.scheduleKind === "fixed" ? "固定" : "讲堂"}</Badge>
+                </div>
+                <div className="template-mini-meta">{template.workNature} · {template.workCategory}</div>
+                <div className="template-mini-meta">{template.projectName || "备注"} · {template.workForm}</div>
+                <div className="template-mini-meta">补全权重 {clampTemplateWeight(template.weight)}</div>
+                {normalizeRemarkOptions(template).length ? <p>{normalizeRemarkOptions(template).slice(0, 3).join(" / ")}{normalizeRemarkOptions(template).length > 3 ? ` 等 ${normalizeRemarkOptions(template).length} 条` : ""}</p> : null}
+                <div className="template-mini-actions">
+                  {templateView === "common" ? (
+                    <Button variant="ghost" onClick={() => setTemplateCommon(template, false)}>移出常用</Button>
+                  ) : template.archived ? (
+                    <Button variant="ghost" onClick={() => restoreTemplate(template)}>恢复</Button>
+                  ) : isCommonTemplate(template) ? (
+                    <Button variant="ghost" onClick={() => setTemplateCommon(template, false)}>移出常用</Button>
+                  ) : (
+                    <Button variant="ghost" onClick={() => setTemplateCommon(template, true)}>设为常用</Button>
+                  )}
+                  <Button variant="ghost" onClick={() => startEditTemplate(template)}><Pencil className="size-4" />编辑</Button>
+                  {templateView === "all" && !template.archived ? <Button variant="ghost" onClick={() => archiveTemplate(template)}>归档</Button> : null}
+                  {templateView === "all" ? <Button variant="danger" onClick={() => removeTemplate(template)}><Trash2 className="size-4" />删除</Button> : null}
+                </div>
+              </article>
+            ))}
+          </div>
+        </section>
+      ))}
+      {visibleTemplates.length === 0 ? (
+        <EmptyState
+          icon={<Wand2 className="size-5" />}
+          title={templateView === "common" ? "暂无常用模板" : "暂无模板"}
+          text={templateView === "common" ? "手动新增或从全部模板中设为常用后，自动补全才会主动使用它们。" : "全部模板会保留完整历史，需要主动补全时再设为常用。"}
         />
-        <div className="space-y-5 p-5">
-          {templateGroups.map((group) => (
-            <section key={group.name} className="template-group">
-              <div className="template-group-head"><span>{group.name}</span><Badge tone="gray">{group.items.length}</Badge></div>
-              <div className="template-card-grid">
-                {group.items.map((template) => (
-                  <article key={template.id} className={cn("template-mini-card", !template.enabled && "disabled")}>
-                    <div className="template-mini-top">
-                      <strong>{template.name}</strong>
-                      <Badge tone={template.scheduleKind === "random" ? "blue" : template.scheduleKind === "fixed" ? "gray" : "amber"}>{template.scheduleKind === "random" ? "随机" : template.scheduleKind === "fixed" ? "固定" : "讲堂"}</Badge>
-                    </div>
-                    <div className="template-mini-meta">{template.workNature} · {template.workCategory}</div>
-                    <div className="template-mini-meta">{template.projectName || "备注"} · {template.workForm}</div>
-                    {template.remark ? <p>{template.remark}</p> : null}
-                    <div className="template-mini-actions">
-                      <Button variant="ghost" onClick={() => toggleTemplate(template)}>{template.enabled ? "停用" : "启用"}</Button>
-                      <Button variant="ghost" onClick={() => startEditTemplate(template)}><Pencil className="size-4" />编辑</Button>
-                      <Button variant="danger" onClick={() => removeTemplate(template)}><Trash2 className="size-4" />删除</Button>
-                    </div>
-                  </article>
-                ))}
-              </div>
-            </section>
-          ))}
-          {state.templates.length === 0 ? <EmptyState icon={<Wand2 className="size-5" />} title="暂无模板" text="可以手动新增模板，或导入旧 JSON 配置生成模板。" /> : null}
+      ) : null}
+    </>
+  );
+
+  const renderCommonCharts = () => (
+    commonTemplates.length ? (
+      <section className="template-group">
+        <div className="template-group-head">
+          <span>常用模板权重</span>
+          <Badge tone="blue">{totalWeight}</Badge>
         </div>
-      </Card>
-    </div>
+        <div className="template-chart-panel">
+          <div className="template-chart-grid">
+            <div className="template-chart-block wide">
+              <div className="template-chart-title">模板权重排行</div>
+              <TemplateWeightChart templates={commonTemplates} dimension="template" type="bar" />
+            </div>
+            <div className="template-chart-block">
+              <div className="template-chart-title">项目分布</div>
+              <TemplateWeightChart templates={commonTemplates} dimension="projectName" type="pie" />
+            </div>
+            <div className="template-chart-block">
+              <div className="template-chart-title">性质分布</div>
+              <TemplateWeightChart templates={commonTemplates} dimension="workNature" type="pie" />
+            </div>
+            <div className="template-chart-block">
+              <div className="template-chart-title">类别分布</div>
+              <TemplateWeightChart templates={commonTemplates} dimension="workCategory" type="bar" />
+            </div>
+            <div className="template-chart-block">
+              <div className="template-chart-title">形式分布</div>
+              <TemplateWeightChart templates={commonTemplates} dimension="workForm" type="bar" />
+            </div>
+          </div>
+        </div>
+      </section>
+    ) : (
+      <EmptyState
+        icon={<ChartPie className="size-5" />}
+        title="暂无常用模板"
+        text="手动新增或从全部模板中设为常用后，这里会显示权重分布。"
+      />
+    )
+  );
+
+  return (
+    <>
+      <PageHeader
+        title="模板库"
+        action={
+          <div className="template-title-tabs">
+            <div className="template-viewbar" role="tablist" aria-label="模板库视图">
+              <button className={templateView === "common" ? "active" : ""} onClick={() => setTemplateView("common")} role="tab" aria-selected={templateView === "common"}>常用模板</button>
+              <button className={templateView === "all" ? "active" : ""} onClick={() => setTemplateView("all")} role="tab" aria-selected={templateView === "all"}>全部模板</button>
+              <button className={templateView === "add" ? "active" : ""} onClick={() => setTemplateView("add")} role="tab" aria-selected={templateView === "add"}>新增模板</button>
+            </div>
+          </div>
+        }
+      />
+      <div className="template-page">
+        {templateView === "common" ? (
+          <>
+            <div className="template-common-switchbar">
+              <div className="toolbar-segmented compact template-mode-switch" role="tablist" aria-label="常用模板显示方式">
+                <button className={cn(commonTemplateMode === "cards" && "active")} onClick={() => setCommonTemplateMode("cards")} role="tab" aria-selected={commonTemplateMode === "cards"}>卡片列表</button>
+                <button className={cn(commonTemplateMode === "charts" && "active")} onClick={() => setCommonTemplateMode("charts")} role="tab" aria-selected={commonTemplateMode === "charts"}>图表</button>
+              </div>
+              <div className="template-common-actions">
+                {renderGroupSwitch()}
+                <Badge tone="blue">{commonTemplates.length}</Badge>
+                <Button variant="ghost" disabled={commonTemplates.length === 0} onClick={pauseCommonTemplates}>全部移出常用</Button>
+              </div>
+            </div>
+            {commonTemplateMode === "cards" ? renderTemplateList(false) : renderCommonCharts()}
+          </>
+        ) : null}
+        {templateView === "all" ? renderTemplateList() : null}
+        {templateView === "add" ? (
+          <div className="template-form-panel">
+              <div><div className="text-base font-semibold text-ink">新增模板</div><div className="mt-1 text-sm text-muted">新增模板会自动加入常用模板，用于后续补全。</div></div>
+              <Field label="模板名称"><Input value={draft.name} onChange={(e) => setDraft({ ...draft, name: e.target.value })} placeholder="例如：资料调研" /></Field>
+              <div className="grid gap-3 md:grid-cols-2"><Field label="工作性质"><Select value={draft.workNature} onChange={(e) => setDraft(normalizeWorkSelection(draft, { workNature: e.target.value }, state.projects))}>{withCurrentOption(workNatureOptions, draft.workNature).map((item) => <option key={item}>{item}</option>)}</Select></Field><Field label="工作类别"><Select value={draft.workCategory} onChange={(e) => setDraft(normalizeWorkSelection(draft, { workCategory: e.target.value }, state.projects))}>{withCurrentOption(getWorkCategoryOptions(draft.workNature), draft.workCategory).map((item) => <option key={item}>{item}</option>)}</Select></Field></div>
+              <Field label="关联项目"><ProjectSelect required={projectRequired} value={draft.projectName} projects={state.projects} workCategory={draft.workCategory} onChange={(projectName) => setDraft({ ...draft, projectName })} /></Field>
+              <div className="grid gap-3 md:grid-cols-2"><Field label="工作形式"><Select value={draft.workForm} onChange={(e) => setDraft(normalizeWorkSelection(draft, { workForm: e.target.value }, state.projects))}>{withCurrentOption(getWorkFormOptions(draft.workNature), draft.workForm).map((item) => <option key={item}>{item}</option>)}</Select></Field><Field label="补全权重"><Input type="number" min={1} max={20} value={draft.weight} onChange={(e) => setDraft({ ...draft, weight: clampTemplateWeight(Number(e.target.value)) })} /></Field></div>
+              <Field label="备注备选"><Textarea value={draft.remark} onChange={(e) => setDraft({ ...draft, remark: e.target.value })} placeholder="每行一个常用备注" /></Field>
+              <Field label="类型"><Select value={draft.scheduleKind} onChange={(e) => setDraft({ ...draft, scheduleKind: e.target.value as WorkTemplate["scheduleKind"] })}><option value="random">随机模板</option><option value="fixed">固定安排</option><option value="weekend_lecture">周末讲堂</option></Select></Field>
+              {draft.scheduleKind !== "random" ? <div className="grid gap-3 md:grid-cols-3"><Field label="周几"><Input type="number" min={1} max={7} value={draft.weekday} onChange={(e) => setDraft({ ...draft, weekday: Number(e.target.value) })} /></Field><Field label="开始"><Input type="time" value={draft.startTime} onChange={(e) => setDraft({ ...draft, startTime: e.target.value })} /></Field><Field label="结束"><Input type="time" value={draft.endTime} onChange={(e) => setDraft({ ...draft, endTime: e.target.value })} /></Field></div> : null}
+              {formError ? <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-300">{formError}</div> : null}
+              <div className="flex gap-2">
+                <Button variant="primary" onClick={addTemplate}><Plus className="size-4" />新增模板</Button>
+              </div>
+          </div>
+        ) : null}
+      </div>
+      {editingTemplate ? (
+        <TemplateEditorModal
+          template={editingTemplate}
+          projects={state.projects}
+          onClose={() => setEditingTemplate(null)}
+          onSave={saveEditedTemplate}
+        />
+      ) : null}
+    </>
+  );
+}
+
+function TemplateEditorModal({
+  template,
+  projects,
+  onClose,
+  onSave,
+}: {
+  template: WorkTemplate;
+  projects: Project[];
+  onClose: () => void;
+  onSave: (template: WorkTemplate) => void | Promise<void>;
+}) {
+  const [draft, setDraft] = useState({
+    name: template.name,
+    workNature: template.workNature,
+    workCategory: template.workCategory,
+    projectName: template.projectName || "",
+    workForm: template.workForm,
+    remark: normalizeRemarkOptions(template).join("\n"),
+    weight: clampTemplateWeight(template.weight),
+    scheduleKind: template.scheduleKind,
+    weekday: template.weekday || 1,
+    startTime: template.startTime || "08:00",
+    endTime: template.endTime || "09:00",
+  });
+  const [formError, setFormError] = useState("");
+  const projectRequired = requiresLinkedProject(draft.workCategory);
+  const remarkOptions = [...new Set(draft.remark.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))].slice(0, 12);
+
+  const submit = async () => {
+    if (projectRequired && (!draft.projectName || draft.projectName === "备注" || !projectExists(projects, draft.projectName))) {
+      setFormError("这个工作类别必须选择项目库中的具体项目。");
+      return;
+    }
+    const projectName = draft.projectName || "备注";
+    const name = draft.name || (projectName !== "备注" ? `${projectName} / ${draft.workForm}` : `${draft.workCategory} / ${draft.workForm}`);
+    await onSave({
+      ...template,
+      name,
+      workNature: draft.workNature,
+      workCategory: draft.workCategory,
+      projectName,
+      workForm: draft.workForm,
+      remark: remarkOptions[0],
+      remarkOptions,
+      weight: clampTemplateWeight(draft.weight),
+      scheduleKind: draft.scheduleKind,
+      weekday: draft.scheduleKind === "random" ? undefined : Number(draft.weekday),
+      startTime: draft.scheduleKind === "random" ? undefined : draft.startTime,
+      endTime: draft.scheduleKind === "random" ? undefined : draft.endTime,
+      updatedAt: now(),
+    });
+  };
+
+  return createPortal(
+    <>
+      <button className="entry-editor-backdrop" aria-label="关闭编辑" onClick={onClose} />
+      <aside className="entry-editor-panel template-editor-panel panel-card">
+        <div className="entry-editor-head">
+          <div>
+            <div className="text-sm font-bold text-ink">编辑模板</div>
+            <div className="mt-1 text-xs text-muted">{template.workCategory} · {template.workForm}</div>
+          </div>
+          <button className="toolbar-icon-button" onClick={onClose} aria-label="关闭"><X className="size-4" /></button>
+        </div>
+        <div className="entry-editor-form">
+          <Field label="模板名称"><Input value={draft.name} onChange={(event) => setDraft({ ...draft, name: event.target.value })} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="工作性质"><Select value={draft.workNature} onChange={(event) => setDraft(normalizeWorkSelection(draft, { workNature: event.target.value }, projects))}>{withCurrentOption(workNatureOptions, draft.workNature).map((item) => <option key={item}>{item}</option>)}</Select></Field>
+            <Field label="工作类别"><Select value={draft.workCategory} onChange={(event) => setDraft(normalizeWorkSelection(draft, { workCategory: event.target.value }, projects))}>{withCurrentOption(getWorkCategoryOptions(draft.workNature), draft.workCategory).map((item) => <option key={item}>{item}</option>)}</Select></Field>
+          </div>
+          <Field label="关联项目"><ProjectSelect required={projectRequired} value={draft.projectName} projects={projects} workCategory={draft.workCategory} onChange={(projectName) => setDraft({ ...draft, projectName })} /></Field>
+          <div className="grid grid-cols-2 gap-3">
+            <Field label="工作形式"><Select value={draft.workForm} onChange={(event) => setDraft(normalizeWorkSelection(draft, { workForm: event.target.value }, projects))}>{withCurrentOption(getWorkFormOptions(draft.workNature), draft.workForm).map((item) => <option key={item}>{item}</option>)}</Select></Field>
+            <Field label="补全权重"><Input type="number" min={1} max={20} value={draft.weight} onChange={(event) => setDraft({ ...draft, weight: clampTemplateWeight(Number(event.target.value)) })} /></Field>
+          </div>
+          <Field label="备注备选"><Textarea value={draft.remark} onChange={(event) => setDraft({ ...draft, remark: event.target.value })} placeholder="每行一个常用备注" /></Field>
+          <Field label="类型"><Select value={draft.scheduleKind} onChange={(event) => setDraft({ ...draft, scheduleKind: event.target.value as WorkTemplate["scheduleKind"] })}><option value="random">随机模板</option><option value="fixed">固定安排</option><option value="weekend_lecture">周末讲堂</option></Select></Field>
+          {draft.scheduleKind !== "random" ? (
+            <div className="grid grid-cols-3 gap-3">
+              <Field label="周几"><Input type="number" min={1} max={7} value={draft.weekday} onChange={(event) => setDraft({ ...draft, weekday: Number(event.target.value) })} /></Field>
+              <Field label="开始"><Input type="time" value={draft.startTime} onChange={(event) => setDraft({ ...draft, startTime: event.target.value })} /></Field>
+              <Field label="结束"><Input type="time" value={draft.endTime} onChange={(event) => setDraft({ ...draft, endTime: event.target.value })} /></Field>
+            </div>
+          ) : null}
+          {formError ? <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-300">{formError}</div> : null}
+        </div>
+        <div className="entry-editor-actions">
+          <Button variant="ghost" onClick={onClose}>取消</Button>
+          <Button className="ml-auto" variant="primary" onClick={submit}><Check className="size-4" />保存</Button>
+        </div>
+      </aside>
+    </>,
+    document.body,
   );
 }
 
@@ -1423,10 +2059,11 @@ function TimesheetPage({ state, month, save, confirmAction }: PageProps) {
 
 function AnalyticsPage({ state }: PageProps) {
   const today = toIsoDate(new Date());
-  const [startDate, setStartDate] = useState(shiftDate(today, -30));
-  const [endDate, setEndDate] = useState(today);
-  const start = startDate <= endDate ? startDate : endDate;
-  const end = startDate <= endDate ? endDate : startDate;
+  const [granularity, setGranularity] = useState<AnalyticsGranularity>("month");
+  const [anchorDate, setAnchorDate] = useState(today);
+  const period = analyticsPeriod(anchorDate, granularity);
+  const start = period.start;
+  const end = period.end;
   const entries = state.entries
     .filter((entry) => entry.status === "confirmed" && entry.workDate >= start && entry.workDate <= end)
     .sort((a, b) => `${a.workDate} ${a.startTime}`.localeCompare(`${b.workDate} ${b.startTime}`));
@@ -1443,37 +2080,17 @@ function AnalyticsPage({ state }: PageProps) {
     { title: "工作形式", dimension: "workForm" },
   ];
 
-  const setThisMonth = () => {
-    const key = monthKey(new Date());
-    setStartDate(`${key}-01`);
-    setEndDate(dateForMonthDay(key, daysInMonth(key)));
-  };
-  const setLastMonth = () => {
-    const current = new Date();
-    const lastMonth = new Date(current.getFullYear(), current.getMonth() - 1, 1);
-    const key = monthKey(lastMonth);
-    setStartDate(`${key}-01`);
-    setEndDate(dateForMonthDay(key, daysInMonth(key)));
-  };
-  const setPastDays = (days: number) => {
-    setStartDate(shiftDate(today, 1 - days));
-    setEndDate(today);
-  };
-
   return (
     <>
       <PageHeader
         title="分析"
-        description="按日期范围查看工时趋势和分布。"
         action={
-          <div className="flex flex-wrap items-center justify-end gap-2">
-            <Button variant="ghost" onClick={() => setPastDays(30)}>近 30 天</Button>
-            <Button variant="ghost" onClick={setThisMonth}>本月</Button>
-            <Button variant="ghost" onClick={setLastMonth}>上月</Button>
-            <Input type="date" value={startDate} onChange={(event) => setStartDate(event.target.value)} className="w-36" aria-label="开始日期" />
-            <span className="text-xs font-medium text-muted">至</span>
-            <Input type="date" value={endDate} onChange={(event) => setEndDate(event.target.value)} className="w-36" aria-label="结束日期" />
-          </div>
+          <AnalyticsTitleToolbar
+            granularity={granularity}
+            anchorDate={anchorDate}
+            onGranularityChange={setGranularity}
+            onAnchorDateChange={setAnchorDate}
+          />
         }
       />
       <div className="grid gap-4 lg:grid-cols-4">
@@ -1510,7 +2127,26 @@ function dateDistance(start: string, end: string) {
 
 function ImportExportPage({ state, month, save, setNotice }: PageProps) {
   const [importing, setImporting] = useState<"excel" | "json" | null>(null);
-  const templateSignature = (template: WorkTemplate) => [template.workNature, template.workCategory, template.projectName || "", template.workForm, template.remark || "", template.scheduleKind].join("\u0001");
+  const mergeImportedTemplates = (incoming: WorkTemplate[], retained: WorkTemplate[], projects: Project[]) => {
+    const templates = new Map<string, WorkTemplate>();
+    [...retained, ...incoming].filter((template) => isTemplateAllowed(template, projects)).forEach((template) => {
+      const key = templateSignature(template);
+      const existing = templates.get(key);
+      if (!existing) {
+        templates.set(key, { ...template, remarkOptions: normalizeRemarkOptions(template), weight: clampTemplateWeight(template.weight || 1) });
+        return;
+      }
+      const remarkOptions = [...new Set([...normalizeRemarkOptions(existing), ...normalizeRemarkOptions(template)])].slice(0, 12);
+      templates.set(key, {
+        ...existing,
+        remark: existing.remark || remarkOptions[0],
+        remarkOptions,
+        weight: clampTemplateWeight(Math.max(existing.weight || 1, template.weight || 1)),
+        updatedAt: now(),
+      });
+    });
+    return [...templates.values()];
+  };
   const handleFile = async (event: ChangeEvent<HTMLInputElement>, kind: "excel" | "json") => {
     const file = event.target.files?.[0];
     if (!file) return;
@@ -1521,11 +2157,11 @@ function ImportExportPage({ state, month, save, setNotice }: PageProps) {
       const retainedProjects = kind === "excel" ? state.projects.filter((project) => project.source !== "excel") : state.projects;
       const projectNames = new Set(retainedProjects.map((project) => project.name));
       const newProjects = (result.projects || []).filter((project) => !projectNames.has(project.name));
+      const projects = [...newProjects, ...retainedProjects];
       const retainedTemplates = kind === "excel" ? state.templates.filter((template) => !template.id.startsWith("template_xlsx_")) : state.templates;
-      const templateNames = new Set(retainedTemplates.map(templateSignature));
-      const newTemplates = (result.templates || []).filter((template) => { const key = templateSignature(template); if (templateNames.has(key)) return false; templateNames.add(key); return true; });
+      const templates = mergeImportedTemplates(result.templates || [], retainedTemplates, projects);
       const entries = kind === "excel" ? mergeContinuousEntries([...state.entries.filter((entry) => entry.source !== "excel"), ...(result.entries || [])]) : result.entries ? mergeContinuousEntries([...state.entries, ...result.entries]) : state.entries;
-      await save({ projects: [...newProjects, ...retainedProjects], templates: [...newTemplates, ...retainedTemplates], entries, jobs: [...result.jobs, ...state.jobs] }, result.summary);
+      await save({ projects, templates, entries, jobs: [...result.jobs, ...state.jobs] }, result.summary);
     } catch (error) {
       const job = { id: createId("job"), kind: kind === "excel" ? "excel_import" as const : "json_import" as const, fileName: file.name, status: "failed" as const, errorText: String(error), createdAt: now() };
       await save({ jobs: [job, ...state.jobs] }, "导入失败");
@@ -1565,7 +2201,6 @@ function SettingsPage({ state, save }: PageProps) {
       <PageHeader title="设置" description="维护默认作息、主题和显示偏好。" action={<Button variant="primary" onClick={() => save({ profile: { ...profile, updatedAt: now() } }, "设置已保存")}>保存设置</Button>} />
       <Card className="max-w-3xl p-5">
         <div className="grid gap-4 md:grid-cols-2">
-          <Field label="语言"><Select value={profile.language} onChange={(e) => setProfile({ ...profile, language: e.target.value as WorkspaceState["profile"]["language"] })}><option value="zh-CN">中文</option><option value="en-US">English</option></Select></Field>
           <Field label="默认开始"><Input type="time" value={profile.defaultStart} onChange={(e) => setProfile({ ...profile, defaultStart: e.target.value })} /></Field>
           <Field label="默认结束"><Input type="time" value={profile.defaultEnd} onChange={(e) => setProfile({ ...profile, defaultEnd: e.target.value })} /></Field>
           <Field label="午休开始"><Input type="time" value={profile.lunchStart} onChange={(e) => setProfile({ ...profile, lunchStart: e.target.value })} /></Field>
