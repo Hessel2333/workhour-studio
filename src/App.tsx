@@ -94,6 +94,13 @@ type WorkSelection = {
   projectName?: string;
 };
 
+type ConfirmRequest = {
+  title: string;
+  text: string;
+  confirmText?: string;
+  onConfirm: () => void | Promise<void>;
+};
+
 const getWorkCategoryOptions = (workNature: string) => workCategoryOptionsByNature[workNature] || workCategoryOptions;
 const getWorkFormOptions = (workNature: string) => workFormOptionsByNature[workNature] || workFormOptions;
 const withCurrentOption = (options: string[], current?: string) => current && !options.includes(current) ? [current, ...options] : options;
@@ -183,8 +190,9 @@ function App() {
   const [scheduleMode, setScheduleMode] = useState<"day" | "week">("week");
   const [scheduleDate, setScheduleDate] = useState(new Date().toISOString().slice(0, 10));
   const [scheduleUndoEntries, setScheduleUndoEntries] = useState<TimesheetEntry[] | null>(null);
-  const [notice, setNotice] = useState("本地数据库准备中");
+  const [notice, setNotice] = useState("");
   const [busy, setBusy] = useState(true);
+  const [confirmRequest, setConfirmRequest] = useState<ConfirmRequest | null>(null);
 
   useEffect(() => {
     loadWorkspace()
@@ -228,11 +236,26 @@ function App() {
     if (state) applyTheme(state.profile.theme);
   }, [state?.profile.theme]);
 
+  useEffect(() => {
+    if (!state || !notice) return undefined;
+    const timer = window.setTimeout(() => setNotice(""), 3600);
+    return () => window.clearTimeout(timer);
+  }, [notice, state]);
+
   const save = async (patch: Partial<WorkspaceState>, message?: string) => {
     if (!state) return;
     const next = await saveStatePatch(patch, state);
     setState(next);
     if (message) setNotice(message);
+  };
+
+  const confirmAction = (request: ConfirmRequest) => setConfirmRequest(request);
+
+  const runConfirmedAction = async () => {
+    const request = confirmRequest;
+    if (!request) return;
+    setConfirmRequest(null);
+    await request.onConfirm();
   };
 
   const saveScheduleEntries = async (entries: TimesheetEntry[], message: string) => {
@@ -267,7 +290,16 @@ function App() {
 
   const deleteScheduleDay = async () => {
     if (!state) return;
-    await saveScheduleEntries(state.entries.filter((entry) => entry.workDate !== scheduleDate), "已删除当日记录");
+    const count = state.entries.filter((entry) => entry.workDate === scheduleDate).length;
+    if (!count) return;
+    confirmAction({
+      title: "删除当日记录？",
+      text: `${scheduleDate} 的 ${count} 条记录会被移除，可在日程页撤销最近一次日程操作。`,
+      confirmText: "删除",
+      onConfirm: async () => {
+        await saveScheduleEntries(state.entries.filter((entry) => entry.workDate !== scheduleDate), "已删除当日记录");
+      },
+    });
   };
 
   const generateScheduleDrafts = async (scope: "day" | "week") => {
@@ -285,16 +317,16 @@ function App() {
 
   if (!state) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-canvas text-ink">
+      <div className="flex min-h-[100dvh] items-center justify-center bg-canvas text-ink">
         <div className="surface flex items-center gap-3 rounded-2xl px-4 py-3 text-sm">
           <Loader2 className="size-4 animate-spin text-accent" />
-          {busy ? "正在打开工作台" : notice}
+          {busy ? "正在打开工作台" : notice || "启动失败"}
         </div>
       </div>
     );
   }
 
-  const pageProps = { state, month, save, setNotice, scheduleMode, setScheduleMode, scheduleDate, setScheduleDate };
+  const pageProps = { state, month, save, setNotice, confirmAction, scheduleMode, setScheduleMode, scheduleDate, setScheduleDate };
   const currentPage = pages.find((item) => item.key === page);
 
   return (
@@ -309,13 +341,13 @@ function App() {
         </div>
         <nav className="space-y-1.5">
           {pages.filter((item) => item.key !== "guide").map((item) => (
-            <button key={item.key} onClick={() => setPage(item.key)} className={cn("nav-item w-full", page === item.key && "active")}>
+            <button key={item.key} onClick={() => setPage(item.key)} aria-current={page === item.key ? "page" : undefined} className={cn("nav-item w-full", page === item.key && "active")}>
               {item.label}
             </button>
           ))}
         </nav>
         <div className="mt-auto space-y-1.5 px-1 pb-3">
-          <button onClick={() => setPage("guide")} className={cn("nav-item w-full", page === "guide" && "active")}>
+          <button onClick={() => setPage("guide")} aria-current={page === "guide" ? "page" : undefined} className={cn("nav-item w-full", page === "guide" && "active")}>
             说明
           </button>
         </div>
@@ -376,6 +408,14 @@ function App() {
           {page === "settings" && <SettingsPage {...pageProps} />}
         </div>
       </main>
+      {notice ? <div className="notice-toast" role="status" aria-live="polite">{notice}</div> : null}
+      {confirmRequest ? (
+        <ConfirmDialog
+          request={confirmRequest}
+          onCancel={() => setConfirmRequest(null)}
+          onConfirm={runConfirmedAction}
+        />
+      ) : null}
     </div>
   );
 }
@@ -390,12 +430,38 @@ function ThemeSwitch({ value, onChange, compact = false }: { value: ThemeMode; o
       ].map((item) => {
         const Icon = item.icon;
         return (
-          <button key={item.key} title={item.label} onClick={() => onChange(item.key as ThemeMode)} className={cn("flex size-8 items-center justify-center rounded-full text-muted transition hover:text-ink", value === item.key && "bg-white text-ink shadow-sm dark:bg-white/15")}>
+          <button key={item.key} title={item.label} aria-label={item.label} onClick={() => onChange(item.key as ThemeMode)} className={cn("flex size-8 items-center justify-center rounded-lg text-muted transition hover:text-ink", value === item.key && "bg-white text-ink shadow-sm dark:bg-white/15")}>
             <Icon className="size-3.5" />
           </button>
         );
       })}
     </div>
+  );
+}
+
+function ConfirmDialog({
+  request,
+  onCancel,
+  onConfirm,
+}: {
+  request: ConfirmRequest;
+  onCancel: () => void;
+  onConfirm: () => void;
+}) {
+  return (
+    <>
+      <button className="confirm-backdrop" aria-label="取消操作" onClick={onCancel} />
+      <section className="confirm-panel surface" role="dialog" aria-modal="true" aria-labelledby="confirm-title">
+        <div>
+          <h2 id="confirm-title" className="text-base font-semibold tracking-[-0.02em] text-ink">{request.title}</h2>
+          <p className="mt-2 text-sm leading-6 text-muted">{request.text}</p>
+        </div>
+        <div className="mt-5 flex justify-end gap-2">
+          <Button variant="ghost" onClick={onCancel}>取消</Button>
+          <Button variant="danger" onClick={onConfirm}>{request.confirmText || "确认"}</Button>
+        </div>
+      </section>
+    </>
   );
 }
 
@@ -453,7 +519,7 @@ function MobileNav({ active, onChange }: { active: PageKey; onChange: (page: Pag
   return (
     <div className="mb-4 flex gap-2 overflow-x-auto pb-1 md:hidden">
       {pages.map((item) => (
-        <Button key={item.key} variant={active === item.key ? "primary" : "secondary"} onClick={() => onChange(item.key)} className="shrink-0">
+        <Button key={item.key} variant={active === item.key ? "primary" : "secondary"} aria-current={active === item.key ? "page" : undefined} onClick={() => onChange(item.key)} className="shrink-0">
           {item.label}
         </Button>
       ))}
@@ -470,6 +536,7 @@ type PageProps = {
   setScheduleDate: (date: string) => void;
   save: (patch: Partial<WorkspaceState>, message?: string) => Promise<void>;
   setNotice: (value: string) => void;
+  confirmAction: (request: ConfirmRequest) => void;
 };
 
 function Dashboard({ state, month, save }: PageProps) {
@@ -497,6 +564,7 @@ function Dashboard({ state, month, save }: PageProps) {
     <>
       <PageHeader
         title="仪表盘"
+        description="查看本月完成度、今日记录和待确认草稿。"
         action={
           <div className="flex flex-wrap gap-2">
             <Button onClick={createDrafts}><Wand2 className="size-4" />生成补全草稿</Button>
@@ -667,7 +735,7 @@ const clampInteractiveRange = (startMinute: number, endMinute: number) => {
   return { start, end };
 };
 
-function SchedulePage({ state, month, save, scheduleMode: mode, scheduleDate: selectedDate, setScheduleDate: setSelectedDate }: PageProps) {
+function SchedulePage({ state, month, save, confirmAction, scheduleMode: mode, scheduleDate: selectedDate, setScheduleDate: setSelectedDate }: PageProps) {
   const dayEntries = state.entries.filter((entry) => entry.workDate === selectedDate).sort((a, b) => a.startTime.localeCompare(b.startTime));
   const slots = [];
   for (let minute = toMinutes(state.profile.defaultStart); minute < toMinutes(state.profile.defaultEnd); minute += 30) {
@@ -679,8 +747,8 @@ function SchedulePage({ state, month, save, scheduleMode: mode, scheduleDate: se
 
   return (
     <>
-      <PageHeader title="日程" />
-      {mode === "week" ? <WeekSchedule state={state} selectedDate={selectedDate} onSelectDate={setSelectedDate} save={save} /> : (
+      <PageHeader title="日程" description="按日或按周维护时间块，生成并确认补全草稿。" />
+      {mode === "week" ? <WeekSchedule state={state} selectedDate={selectedDate} onSelectDate={setSelectedDate} save={save} confirmAction={confirmAction} /> : (
         <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
           <Card className="p-4">
             <Field label="日期"><Input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} /></Field>
@@ -718,11 +786,13 @@ function WeekSchedule({
   selectedDate,
   onSelectDate,
   save,
+  confirmAction,
 }: {
   state: WorkspaceState;
   selectedDate: string;
   onSelectDate: (date: string) => void;
   save: (patch: Partial<WorkspaceState>, message?: string) => Promise<void>;
+  confirmAction: (request: ConfirmRequest) => void;
 }) {
   const suppressClickUntilRef = useRef(0);
   const interactionRef = useRef<ScheduleInteraction | null>(null);
@@ -746,9 +816,16 @@ function WeekSchedule({
     await save({ entries: state.entries.map((entry) => (entry.id === id ? { ...entry, ...patch, updatedAt: now() } : entry)) }, message);
   };
 
-  const deleteEntry = async (id: string) => {
-    setSelectedEntryId(null);
-    await save({ entries: state.entries.filter((entry) => entry.id !== id) }, "时间块已删除");
+  const deleteEntry = (entry: TimesheetEntry) => {
+    confirmAction({
+      title: "删除时间块？",
+      text: `${entry.workDate} ${entry.startTime}-${entry.endTime} 的记录会被移除。`,
+      confirmText: "删除",
+      onConfirm: async () => {
+        setSelectedEntryId(null);
+        await save({ entries: state.entries.filter((item) => item.id !== entry.id) }, "时间块已删除");
+      },
+    });
   };
 
   useEffect(() => {
@@ -956,7 +1033,7 @@ function WeekSchedule({
           entry={selectedEntry}
           projects={state.projects}
           onClose={() => setSelectedEntryId(null)}
-          onDelete={() => deleteEntry(selectedEntry.id)}
+          onDelete={() => deleteEntry(selectedEntry)}
           onSave={(patch) => {
             updateEntry(selectedEntry.id, patch, "时间块已保存");
             setSelectedEntryId(null);
@@ -1046,7 +1123,7 @@ function EntryEditorModal({
   );
 }
 
-function ProjectsPage({ state, save }: PageProps) {
+function ProjectsPage({ state, save, confirmAction }: PageProps) {
   const [query, setQuery] = useState("");
   const [draft, setDraft] = useState({ name: "", code: "", category: "探索项目" });
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -1070,7 +1147,17 @@ function ProjectsPage({ state, save }: PageProps) {
   };
 
   const toggleFavorite = async (project: Project) => save({ projects: state.projects.map((item) => item.id === project.id ? { ...item, isFavorite: !item.isFavorite, updatedAt: now() } : item) });
-  const removeProject = async (project: Project) => { await save({ projects: state.projects.filter((item) => item.id !== project.id) }, "项目已从项目库移除"); if (editingId === project.id) resetDraft(); };
+  const removeProject = (project: Project) => {
+    confirmAction({
+      title: "删除项目？",
+      text: `“${project.name}”会从项目库移除，已有工时记录不会被删除。`,
+      confirmText: "删除",
+      onConfirm: async () => {
+        await save({ projects: state.projects.filter((item) => item.id !== project.id) }, "项目已从项目库移除");
+        if (editingId === project.id) resetDraft();
+      },
+    });
+  };
   const sourceLabel = (source: Project["source"]) => source === "excel" ? "导入" : source === "json" ? "配置" : source === "script" ? "脚本" : "手动";
 
   return (
@@ -1089,7 +1176,7 @@ function ProjectsPage({ state, save }: PageProps) {
       </Card>
       <Card>
         <CardHeader title="项目池" action={<div className="relative w-64"><Search className="pointer-events-none absolute left-3 top-2.5 size-4 text-muted" /><Input className="pl-9" value={query} onChange={(e) => setQuery(e.target.value)} placeholder="搜索项目" /></div>} />
-        <div className="overflow-auto scrollbar-soft">
+        {projects.length === 0 ? <div className="p-5"><EmptyState icon={<FolderKanban className="size-5" />} title={query ? "没有匹配项目" : "暂无项目"} text={query ? "换个关键词，或新增一个常用项目。" : "先把常用项目加入项目库，后续填报会更快。"} /></div> : <div className="overflow-auto scrollbar-soft">
           <table className="table-glass w-full min-w-[880px] text-left text-sm">
             <thead className="border-b border-line/10 text-xs text-muted"><tr><th className="px-5 py-3">项目名称</th><th className="px-5 py-3">项目号</th><th className="px-5 py-3">类别</th><th className="px-5 py-3">来源</th><th className="px-5 py-3">常用</th><th className="px-5 py-3">操作</th></tr></thead>
             <tbody>
@@ -1102,13 +1189,13 @@ function ProjectsPage({ state, save }: PageProps) {
               ))}
             </tbody>
           </table>
-        </div>
+        </div>}
       </Card>
     </div>
   );
 }
 
-function TemplatesPage({ state, save }: PageProps) {
+function TemplatesPage({ state, save, confirmAction }: PageProps) {
   const [draft, setDraft] = useState({ name: "", workNature: "科研工作", workCategory: "探索项目", projectName: "", workForm: "资料调研", remark: "", weight: 10, scheduleKind: "random" as WorkTemplate["scheduleKind"], weekday: 1, startTime: "08:00", endTime: "09:00" });
   const [editingId, setEditingId] = useState<string | null>(null);
   const [groupBy, setGroupBy] = useState<"kind" | "nature" | "project">("nature");
@@ -1165,8 +1252,28 @@ function TemplatesPage({ state, save }: PageProps) {
     resetDraft();
   };
   const toggleTemplate = (template: WorkTemplate) => save({ templates: state.templates.map((item) => item.id === template.id ? { ...item, enabled: !item.enabled, updatedAt: now() } : item) });
-  const removeTemplate = async (template: WorkTemplate) => { await save({ templates: state.templates.filter((item) => item.id !== template.id) }, "模板已删除"); if (editingId === template.id) resetDraft(); };
-  const clearTemplates = async () => { await save({ templates: [] }, "模板库已清空"); resetDraft(); };
+  const removeTemplate = (template: WorkTemplate) => {
+    confirmAction({
+      title: "删除模板？",
+      text: `“${template.name}”会从模板库移除，不影响已经生成的工时记录。`,
+      confirmText: "删除",
+      onConfirm: async () => {
+        await save({ templates: state.templates.filter((item) => item.id !== template.id) }, "模板已删除");
+        if (editingId === template.id) resetDraft();
+      },
+    });
+  };
+  const clearTemplates = () => {
+    confirmAction({
+      title: "清空模板库？",
+      text: `当前 ${state.templates.length} 个模板都会被移除。这个操作不会删除项目和工时记录。`,
+      confirmText: "清空",
+      onConfirm: async () => {
+        await save({ templates: [] }, "模板库已清空");
+        resetDraft();
+      },
+    });
+  };
 
   return (
     <div className="grid gap-5 xl:grid-cols-[380px_minmax(0,1fr)]">
@@ -1215,7 +1322,7 @@ function TemplatesPage({ state, save }: PageProps) {
                     <div className="template-mini-meta">{template.projectName || "备注"} · {template.workForm}</div>
                     {template.remark ? <p>{template.remark}</p> : null}
                     <div className="template-mini-actions">
-                      <Button variant="ghost" onClick={() => toggleTemplate(template)}>{template.enabled ? "启用" : "停用"}</Button>
+                      <Button variant="ghost" onClick={() => toggleTemplate(template)}>{template.enabled ? "停用" : "启用"}</Button>
                       <Button variant="ghost" onClick={() => startEditTemplate(template)}><Pencil className="size-4" />编辑</Button>
                       <Button variant="danger" onClick={() => removeTemplate(template)}><Trash2 className="size-4" />删除</Button>
                     </div>
@@ -1248,15 +1355,33 @@ function groupTemplates(templates: WorkTemplate[], groupBy: "kind" | "nature" | 
   }));
 }
 
-function TimesheetPage({ state, month, save }: PageProps) {
+function TimesheetPage({ state, month, save, confirmAction }: PageProps) {
   const [draft, setDraft] = useState({ workDate: `${month}-01`, startTime: "08:00", endTime: "09:00", workNature: "科研工作", workCategory: "探索项目", projectName: "", workForm: "资料调研", remark: "" });
   const [editingEntry, setEditingEntry] = useState<TimesheetEntry | null>(null);
+  const [formError, setFormError] = useState("");
   const entries = state.entries.filter((entry) => entry.workDate.startsWith(month)).sort((a, b) => `${a.workDate} ${a.startTime}`.localeCompare(`${b.workDate} ${b.startTime}`));
   const addEntry = async () => {
+    if (toMinutes(draft.endTime) <= toMinutes(draft.startTime)) {
+      setFormError("结束时间需要晚于开始时间。");
+      return;
+    }
+    const hasOverlap = state.entries.some((entry) => entry.workDate === draft.workDate && overlaps(draft.startTime, draft.endTime, entry.startTime, entry.endTime));
+    if (hasOverlap) {
+      setFormError("这个时间段与已有记录重叠。");
+      return;
+    }
+    setFormError("");
     const entry: TimesheetEntry = { id: createId("entry"), ...draft, status: "confirmed", source: "manual", createdAt: now(), updatedAt: now() };
     await save({ entries: mergeContinuousEntries([entry, ...state.entries]) }, "工时记录已保存");
   };
-  const removeEntry = (id: string) => save({ entries: state.entries.filter((entry) => entry.id !== id) }, "记录已删除");
+  const removeEntry = (entry: TimesheetEntry) => {
+    confirmAction({
+      title: "删除工时记录？",
+      text: `${entry.workDate} ${entry.startTime}-${entry.endTime} 的记录会被移除。`,
+      confirmText: "删除",
+      onConfirm: () => save({ entries: state.entries.filter((item) => item.id !== entry.id) }, "记录已删除"),
+    });
+  };
   const updateEntry = async (id: string, patch: Partial<TimesheetEntry>) => {
     await save({ entries: state.entries.map((entry) => entry.id === id ? { ...entry, ...patch, updatedAt: now() } : entry) }, "记录已更新");
     setEditingEntry(null);
@@ -1269,15 +1394,16 @@ function TimesheetPage({ state, month, save }: PageProps) {
           <Field label="性质"><Select value={draft.workNature} onChange={(e) => setDraft(normalizeWorkSelection(draft, { workNature: e.target.value }, state.projects))}>{withCurrentOption(workNatureOptions, draft.workNature).map((item) => <option key={item}>{item}</option>)}</Select></Field><Field label="类别"><Select value={draft.workCategory} onChange={(e) => setDraft(normalizeWorkSelection(draft, { workCategory: e.target.value }, state.projects))}>{withCurrentOption(getWorkCategoryOptions(draft.workNature), draft.workCategory).map((item) => <option key={item}>{item}</option>)}</Select></Field><Field label="项目"><ProjectSelect value={draft.projectName} projects={state.projects} workCategory={draft.workCategory} onChange={(projectName) => setDraft({ ...draft, projectName })} /></Field>
           <Field label="形式"><Select value={draft.workForm} onChange={(e) => setDraft(normalizeWorkSelection(draft, { workForm: e.target.value }, state.projects))}>{withCurrentOption(getWorkFormOptions(draft.workNature), draft.workForm).map((item) => <option key={item}>{item}</option>)}</Select></Field><Field label="备注"><Input value={draft.remark} onChange={(e) => setDraft({ ...draft, remark: e.target.value })} /></Field><div className="flex items-end"><Button variant="primary" onClick={addEntry} className="w-full"><Plus className="size-4" />新增</Button></div>
         </div>
+        {formError ? <p className="mt-3 rounded-lg border border-red-500/15 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-300">{formError}</p> : null}
       </Card>
       <Card>
         <CardHeader title={`${month} 工时记录`} action={<Badge tone="blue">{entries.reduce((sum, entry) => sum + durationHours(entry.startTime, entry.endTime), 0).toFixed(1)}h</Badge>} />
-        <div className="overflow-auto scrollbar-soft">
+        {entries.length === 0 ? <div className="p-5"><EmptyState icon={<Table2 className="size-5" />} title="暂无工时记录" text="新增一条记录，或从导入导出页导入 Excel。" /></div> : <div className="overflow-auto scrollbar-soft">
           <table className="table-glass w-full min-w-[980px] text-left text-sm">
             <thead className="border-b border-line/10 text-xs text-muted"><tr><th className="px-5 py-3">日期</th><th className="px-5 py-3">时间</th><th className="px-5 py-3">性质</th><th className="px-5 py-3">类别</th><th className="px-5 py-3">关联项目</th><th className="px-5 py-3">形式</th><th className="px-5 py-3">备注</th><th className="px-5 py-3">状态</th><th className="px-5 py-3">操作</th></tr></thead>
-            <tbody>{entries.map((entry) => <tr key={entry.id} className="border-b border-line/10"><td className="px-5 py-3">{entry.workDate}</td><td className="px-5 py-3 text-muted">{entry.startTime}-{entry.endTime}</td><td className="px-5 py-3">{entry.workNature}</td><td className="px-5 py-3">{entry.workCategory}</td><td className="px-5 py-3 text-muted">{entry.projectName || "备注"}</td><td className="px-5 py-3">{entry.workForm}</td><td className="px-5 py-3 text-muted">{entry.remark || "-"}</td><td className="px-5 py-3"><Badge tone={entry.status === "draft" ? "amber" : "blue"}>{entry.status === "draft" ? "草稿" : "已确认"}</Badge></td><td className="px-5 py-3"><div className="flex gap-2"><Button variant="ghost" onClick={() => setEditingEntry(entry)}><Pencil className="size-4" />编辑</Button><Button variant="ghost" onClick={() => removeEntry(entry.id)}>删除</Button></div></td></tr>)}</tbody>
+            <tbody>{entries.map((entry) => <tr key={entry.id} className="border-b border-line/10"><td className="px-5 py-3">{entry.workDate}</td><td className="px-5 py-3 text-muted">{entry.startTime}-{entry.endTime}</td><td className="px-5 py-3">{entry.workNature}</td><td className="px-5 py-3">{entry.workCategory}</td><td className="px-5 py-3 text-muted">{entry.projectName || "备注"}</td><td className="px-5 py-3">{entry.workForm}</td><td className="px-5 py-3 text-muted">{entry.remark || "-"}</td><td className="px-5 py-3"><Badge tone={entry.status === "draft" ? "amber" : "blue"}>{entry.status === "draft" ? "草稿" : "已确认"}</Badge></td><td className="px-5 py-3"><div className="flex gap-2"><Button variant="ghost" onClick={() => setEditingEntry(entry)}><Pencil className="size-4" />编辑</Button><Button variant="ghost" onClick={() => removeEntry(entry)}>删除</Button></div></td></tr>)}</tbody>
           </table>
-        </div>
+        </div>}
       </Card>
       {editingEntry ? (
         <EntryEditorModal
@@ -1286,7 +1412,7 @@ function TimesheetPage({ state, month, save }: PageProps) {
           onClose={() => setEditingEntry(null)}
           onSave={(patch) => updateEntry(editingEntry.id, patch)}
           onDelete={() => {
-            removeEntry(editingEntry.id);
+            removeEntry(editingEntry);
             setEditingEntry(null);
           }}
         />
@@ -1338,6 +1464,7 @@ function AnalyticsPage({ state }: PageProps) {
     <>
       <PageHeader
         title="分析"
+        description="按日期范围查看工时趋势和分布。"
         action={
           <div className="flex flex-wrap items-center justify-end gap-2">
             <Button variant="ghost" onClick={() => setPastDays(30)}>近 30 天</Button>
@@ -1382,11 +1509,13 @@ function dateDistance(start: string, end: string) {
 }
 
 function ImportExportPage({ state, month, save, setNotice }: PageProps) {
+  const [importing, setImporting] = useState<"excel" | "json" | null>(null);
   const templateSignature = (template: WorkTemplate) => [template.workNature, template.workCategory, template.projectName || "", template.workForm, template.remark || "", template.scheduleKind].join("\u0001");
   const handleFile = async (event: ChangeEvent<HTMLInputElement>, kind: "excel" | "json") => {
     const file = event.target.files?.[0];
     if (!file) return;
     try {
+      setImporting(kind);
       setNotice("正在导入文件");
       const result = kind === "excel" ? await importExcelWorkbook(file) : await importConfigJson(file);
       const retainedProjects = kind === "excel" ? state.projects.filter((project) => project.source !== "excel") : state.projects;
@@ -1401,6 +1530,7 @@ function ImportExportPage({ state, month, save, setNotice }: PageProps) {
       const job = { id: createId("job"), kind: kind === "excel" ? "excel_import" as const : "json_import" as const, fileName: file.name, status: "failed" as const, errorText: String(error), createdAt: now() };
       await save({ jobs: [job, ...state.jobs] }, "导入失败");
     } finally {
+      setImporting(null);
       event.target.value = "";
     }
   };
@@ -1411,18 +1541,18 @@ function ImportExportPage({ state, month, save, setNotice }: PageProps) {
   return (
     <>
       <div className="grid gap-5 lg:grid-cols-3">
-        <Card className="p-5"><Upload className="mb-4 size-6 text-accent" /><h2 className="font-semibold">导入 Excel</h2><p className="mt-1 text-sm text-muted">导入项目清单、一级二级菜单和 2026 年及以后的月度填报历史。</p><label className="mt-4 inline-flex"><input className="hidden" type="file" accept=".xlsx,.xls" onChange={(event) => handleFile(event, "excel")} /><span className="inline-flex h-9 items-center rounded-full border border-line/10 bg-white/70 px-4 text-sm font-semibold shadow-sm dark:bg-white/10">选择 Excel</span></label></Card>
-        <Card className="p-5"><Upload className="mb-4 size-6 text-accent" /><h2 className="font-semibold">导入配置</h2><p className="mt-1 text-sm text-muted">导入旧生成器的工作内容配置，转换为模板库。</p><label className="mt-4 inline-flex"><input className="hidden" type="file" accept=".json" onChange={(event) => handleFile(event, "json")} /><span className="inline-flex h-9 items-center rounded-full border border-line/10 bg-white/70 px-4 text-sm font-semibold shadow-sm dark:bg-white/10">选择 JSON</span></label></Card>
-        <Card className="p-5"><Download className="mb-4 size-6 text-accent" /><h2 className="font-semibold">导出月度 Excel</h2><p className="mt-1 text-sm text-muted">导出当前月份，字段顺序兼容 Tampermonkey 脚本读取。</p><Button className="mt-4" variant="primary" onClick={exportExcel}>导出 {month}</Button></Card>
+        <Card className="p-5"><Upload className="mb-4 size-6 text-accent" /><h2 className="font-semibold">导入 Excel</h2><p className="mt-1 text-sm text-muted">导入项目清单、一级二级菜单和 2026 年及以后的月度填报历史。</p><label className="mt-4 inline-flex"><input className="sr-only" type="file" accept=".xlsx,.xls" disabled={Boolean(importing)} onChange={(event) => handleFile(event, "excel")} /><span className="inline-flex h-9 items-center rounded-lg border border-line/10 bg-white/70 px-4 text-sm font-semibold transition hover:bg-white dark:bg-white/10">{importing === "excel" ? "正在导入" : "选择 Excel"}</span></label></Card>
+        <Card className="p-5"><Upload className="mb-4 size-6 text-accent" /><h2 className="font-semibold">导入配置</h2><p className="mt-1 text-sm text-muted">导入保存的工作内容配置，转换为可复用模板。</p><label className="mt-4 inline-flex"><input className="sr-only" type="file" accept=".json" disabled={Boolean(importing)} onChange={(event) => handleFile(event, "json")} /><span className="inline-flex h-9 items-center rounded-lg border border-line/10 bg-white/70 px-4 text-sm font-semibold transition hover:bg-white dark:bg-white/10">{importing === "json" ? "正在导入" : "选择 JSON"}</span></label></Card>
+        <Card className="p-5"><Download className="mb-4 size-6 text-accent" /><h2 className="font-semibold">导出月度 Excel</h2><p className="mt-1 text-sm text-muted">导出当前月份，字段顺序适配填报文件。</p><Button className="mt-4" variant="primary" onClick={exportExcel}>导出 {month}</Button></Card>
       </div>
       <Card className="mt-5">
         <CardHeader title="导入导出历史" />
-        <div className="overflow-auto scrollbar-soft">
+        {state.jobs.length === 0 ? <div className="p-5"><EmptyState icon={<FileSpreadsheet className="size-5" />} title="暂无导入导出历史" text="导入文件或导出月度 Excel 后，处理结果会显示在这里。" /></div> : <div className="overflow-auto scrollbar-soft">
           <table className="table-glass w-full min-w-[760px] text-left text-sm">
             <thead className="border-b border-line/10 text-xs text-muted"><tr><th className="px-5 py-3">时间</th><th className="px-5 py-3">类型</th><th className="px-5 py-3">文件</th><th className="px-5 py-3">结果</th><th className="px-5 py-3">摘要</th></tr></thead>
             <tbody>{state.jobs.map((job) => <tr key={job.id} className="border-b border-line/10"><td className="px-5 py-3 text-muted">{job.createdAt.slice(0, 19).replace("T", " ")}</td><td className="px-5 py-3">{job.kind}</td><td className="px-5 py-3">{job.fileName}</td><td className="px-5 py-3"><Badge tone={job.status === "success" ? "blue" : "red"}>{job.status === "success" ? "成功" : "失败"}</Badge></td><td className="px-5 py-3 text-muted">{job.summary || job.errorText || "-"}</td></tr>)}</tbody>
           </table>
-        </div>
+        </div>}
       </Card>
     </>
   );
@@ -1432,7 +1562,7 @@ function SettingsPage({ state, save }: PageProps) {
   const [profile, setProfile] = useState(state.profile);
   return (
     <>
-      <PageHeader title="设置" action={<Button variant="primary" onClick={() => save({ profile: { ...profile, updatedAt: now() } }, "设置已保存")}>保存设置</Button>} />
+      <PageHeader title="设置" description="维护默认作息、主题和显示偏好。" action={<Button variant="primary" onClick={() => save({ profile: { ...profile, updatedAt: now() } }, "设置已保存")}>保存设置</Button>} />
       <Card className="max-w-3xl p-5">
         <div className="grid gap-4 md:grid-cols-2">
           <Field label="语言"><Select value={profile.language} onChange={(e) => setProfile({ ...profile, language: e.target.value as WorkspaceState["profile"]["language"] })}><option value="zh-CN">中文</option><option value="en-US">English</option></Select></Field>

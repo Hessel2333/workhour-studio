@@ -2,7 +2,7 @@ import type { InputHTMLAttributes, SelectHTMLAttributes, TextareaHTMLAttributes 
 import { cn } from "../../lib/utils";
 
 const control =
-  "h-9 w-full rounded-full border border-line/10 bg-white/80 px-3 text-sm text-ink outline-none shadow-[inset_0_1px_0_rgb(255_255_255_/_0.9)] transition placeholder:text-muted/70 focus:border-accent/50 focus:ring-4 focus:ring-accent/15 dark:bg-white/10 dark:border-white/10";
+  "h-9 w-full rounded-lg border border-line/10 bg-white/80 px-3 text-sm text-ink outline-none transition placeholder:text-muted/70 focus:border-accent/50 focus:ring-4 focus:ring-accent/15 dark:border-white/10 dark:bg-white/10";
 
 export function Input(props: InputHTMLAttributes<HTMLInputElement>) {
   return <input {...props} className={cn(control, props.className)} />;

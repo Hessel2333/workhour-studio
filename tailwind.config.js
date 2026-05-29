@@ -6,7 +6,8 @@ export default {
     extend: {
       fontFamily: {
         sans: [
-          "Inter",
+          "SF Pro Text",
+          "SF Pro Display",
           "ui-sans-serif",
           "system-ui",
           "-apple-system",
@@ -34,4 +35,3 @@ export default {
   },
   plugins: [],
 };
-

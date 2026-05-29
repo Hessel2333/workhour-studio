@@ -38,11 +38,12 @@ html {
 body {
   margin: 0;
   min-width: 320px;
-  min-height: 100vh;
+  min-height: 100dvh;
   background: rgb(var(--canvas));
   color: rgb(var(--ink));
   font-family: var(--font-sans);
   letter-spacing: 0;
+  font-variant-numeric: tabular-nums;
 }
 
 #root,
@@ -83,70 +84,63 @@ button {
   display: grid;
   grid-template-columns: 146px minmax(0, 1fr);
   gap: 16px;
-  min-height: 100vh;
+  min-height: 100dvh;
   padding: 16px;
 }
 
 .surface,
 .panel-card {
-  background: rgb(var(--panel) / 0.82);
+  background: rgb(var(--panel) / 0.9);
   border: 1px solid rgb(var(--line) / 0.08);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.55),
-    0 10px 32px rgb(16 24 40 / 0.08);
-  backdrop-filter: saturate(180%) blur(22px);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.035);
 }
 
 .dark .surface,
 .dark .panel-card {
   background: rgb(var(--panel) / 0.92);
   border-color: rgb(255 255 255 / 0.05);
-  box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.06),
-    0 16px 40px rgb(0 0 0 / 0.28);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
 }
 
 .sidebar-shell {
   position: sticky;
   top: 16px;
   align-self: start;
-  min-height: calc(100vh - 32px);
-  border-radius: 28px;
-  background: rgb(255 255 255 / 0.74);
-  border: 1px solid rgb(255 255 255 / 0.68);
-  box-shadow: 0 28px 60px rgb(16 24 40 / 0.12);
-  backdrop-filter: saturate(180%) blur(28px);
+  min-height: calc(100dvh - 32px);
+  border-radius: 20px;
+  background: rgb(255 255 255 / 0.86);
+  border: 1px solid rgb(var(--line) / 0.08);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
 }
 
 .dark .sidebar-shell {
   background: rgb(var(--panel) / 0.86);
   border-color: rgb(255 255 255 / 0.08);
-  box-shadow: 0 28px 72px rgb(0 0 0 / 0.42);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
 }
 
 .workspace-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  min-height: calc(100vh - 32px);
+  min-height: calc(100dvh - 32px);
   overflow: hidden;
-  border-radius: 32px;
-  background: rgb(255 255 255 / 0.78);
-  border: 1px solid rgb(255 255 255 / 0.72);
-  box-shadow: 0 28px 60px rgb(16 24 40 / 0.12);
-  backdrop-filter: saturate(180%) blur(30px);
+  border-radius: 20px;
+  background: rgb(255 255 255 / 0.88);
+  border: 1px solid rgb(var(--line) / 0.08);
+  box-shadow: 0 1px 2px rgb(16 24 40 / 0.04);
 }
 
 .dark .workspace-shell {
   background: rgb(20 23 31 / 0.9);
   border-color: rgb(255 255 255 / 0.08);
-  box-shadow: 0 28px 72px rgb(0 0 0 / 0.42);
+  box-shadow: 0 1px 2px rgb(0 0 0 / 0.18);
 }
 
 .main-toolbar {
   min-height: 68px;
-  background: rgb(255 255 255 / 0.72);
+  background: rgb(255 255 255 / 0.88);
   border-bottom: 1px solid rgb(15 23 42 / 0.06);
-  backdrop-filter: saturate(180%) blur(24px);
+  backdrop-filter: saturate(140%) blur(14px);
 }
 
 .dark .main-toolbar {
@@ -160,7 +154,7 @@ button {
 }
 
 .guide-docs-page {
-  height: calc(100vh - 140px);
+  height: calc(100dvh - 140px);
   min-height: 620px;
   overflow: hidden;
 }
@@ -399,9 +393,9 @@ button {
   place-items: center;
   width: 22px;
   height: 22px;
-  border-radius: 999px;
+  border-radius: 7px;
   background: rgb(var(--accent));
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.5), 0 4px 12px rgb(0 113 227 / 0.24);
+  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.32);
 }
 
 .nav-item {
@@ -409,7 +403,7 @@ button {
   min-height: 44px;
   align-items: center;
   justify-content: center;
-  border-radius: 16px;
+  border-radius: 10px;
   color: rgb(var(--muted));
   font-size: 0.86rem;
   font-weight: 650;
@@ -429,8 +423,7 @@ button {
 .nav-item.active {
   background: rgb(255 255 255 / 0.92);
   color: rgb(var(--ink));
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.92), 0 8px 24px rgb(16 24 40 / 0.08);
-  transform: translateY(-1px);
+  box-shadow: inset 3px 0 0 rgb(var(--accent));
 }
 
 .dark .nav-item.active {
@@ -449,7 +442,7 @@ button {
 .traffic-light.expand { background: #8e8e93; }
 
 .pill-control {
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgb(244 245 248 / 0.9);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.94);
 }
@@ -494,7 +487,7 @@ button {
 .toolbar-icon-button {
   min-height: 38px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   font-size: 0.88rem;
   font-weight: 760;
   transition: background-color 160ms ease, color 160ms ease, box-shadow 160ms ease, transform 160ms ease;
@@ -512,7 +505,7 @@ button {
   align-items: center;
   gap: 6px;
   padding: 3px;
-  border-radius: 999px;
+  border-radius: 12px;
   background: rgb(244 245 248 / 0.92);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.94);
 }
@@ -543,7 +536,7 @@ button {
   height: 38px;
   min-height: 38px;
   border: 0;
-  border-radius: 999px;
+  border-radius: 10px;
   background: rgb(255 255 255 / 0.96);
   color: rgb(var(--ink));
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.94), 0 2px 10px rgb(16 24 40 / 0.04);
@@ -570,7 +563,7 @@ button {
 .toolbar-autofill-control {
   display: inline-flex;
   align-items: center;
-  border-radius: 999px;
+  border-radius: 12px;
   background: rgb(246 247 250 / 0.92);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.92);
 }
@@ -587,7 +580,7 @@ button {
   width: 100px;
   border: 0;
   border-left: 1px solid rgb(var(--line) / 0.08);
-  border-radius: 0 999px 999px 0;
+  border-radius: 0 10px 10px 0;
   background: transparent;
   color: rgb(var(--muted));
   padding: 0 24px 0 10px;
@@ -685,12 +678,12 @@ button {
   position: relative;
   overflow: hidden;
   min-height: 78px;
-  border-radius: 16px;
+  border-radius: 12px;
   border: 1px solid color-mix(in srgb, var(--block-color, #007aff) 18%, white);
   background: color-mix(in srgb, var(--block-color, #007aff) 8%, white);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.42),
-    0 10px 24px rgb(16 24 40 / 0.07);
+    inset 0 1px 0 rgb(255 255 255 / 0.28),
+    0 2px 8px rgb(16 24 40 / 0.045);
   padding: 11px 42px 10px 18px;
 }
 
@@ -807,9 +800,9 @@ button {
   gap: 7px;
   min-height: 136px;
   border: 1px solid rgb(var(--line) / 0.08);
-  border-radius: 18px;
-  background: rgb(255 255 255 / 0.46);
-  box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.54);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.5);
+  box-shadow: none;
   padding: 12px;
 }
 
@@ -880,7 +873,7 @@ button {
 .worktrail-rail {
   position: sticky;
   top: 0;
-  max-height: calc(100vh - 178px);
+  max-height: calc(100dvh - 178px);
   overflow: auto;
   padding: 18px;
   border-radius: 26px;
@@ -904,10 +897,10 @@ button {
 
 .worktrail-palette-card,
 .worktrail-quick-card {
-  border-radius: 24px;
-  background: rgb(255 255 255 / 0.82);
-  border: 1px solid rgb(255 255 255 / 0.68);
-  box-shadow: 0 14px 36px rgb(16 24 40 / 0.08);
+  border-radius: 12px;
+  background: rgb(255 255 255 / 0.74);
+  border: 1px solid rgb(var(--line) / 0.08);
+  box-shadow: none;
 }
 
 .worktrail-palette-card {
@@ -1008,7 +1001,7 @@ button {
   justify-content: center;
   margin-bottom: 8px;
   border: 1px solid transparent;
-  border-radius: 18px;
+  border-radius: 10px;
   background: transparent;
   color: rgb(var(--ink));
 }
@@ -1031,7 +1024,7 @@ button {
 .worktrail-day-body {
   position: relative;
   overflow: hidden;
-  border-radius: 20px;
+  border-radius: 12px;
   background: rgb(255 255 255 / 0.54);
   border: 1px solid rgb(15 23 42 / 0.04);
   box-shadow: inset 0 1px 0 rgb(255 255 255 / 0.62);
@@ -1064,12 +1057,12 @@ button {
   right: 6px;
   z-index: 2;
   overflow: hidden;
-  border-radius: 15px;
+  border-radius: 10px;
   border: 1px solid color-mix(in srgb, var(--block-color, #007aff) 18%, white);
   background: color-mix(in srgb, var(--block-color, #007aff) 8%, white);
   box-shadow:
-    inset 0 1px 0 rgb(255 255 255 / 0.38),
-    0 10px 24px rgb(16 24 40 / 0.08);
+    inset 0 1px 0 rgb(255 255 255 / 0.24),
+    0 2px 8px rgb(16 24 40 / 0.05);
   padding: 9px 10px 8px 15px;
 }
 
@@ -1257,10 +1250,10 @@ button {
   z-index: 61;
   display: flex;
   width: min(440px, calc(100vw - 32px));
-  max-height: calc(100vh - 116px);
+  max-height: calc(100dvh - 116px);
   flex-direction: column;
   overflow: hidden;
-  border-radius: 24px;
+  border-radius: 16px;
 }
 
 .entry-editor-head {
@@ -1287,7 +1280,50 @@ button {
   padding: 14px 16px;
 }
 
+.notice-toast {
+  position: fixed;
+  right: 24px;
+  bottom: 24px;
+  z-index: 70;
+  max-width: min(360px, calc(100vw - 32px));
+  border-radius: 12px;
+  border: 1px solid rgb(var(--line) / 0.08);
+  background: rgb(var(--panel) / 0.96);
+  box-shadow: 0 8px 24px rgb(16 24 40 / 0.12);
+  color: rgb(var(--ink));
+  padding: 12px 14px;
+  font-size: 0.86rem;
+  font-weight: 620;
+}
+
+.confirm-backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  border: 0;
+  background: rgb(15 23 42 / 0.18);
+}
+
+.confirm-panel {
+  position: fixed;
+  left: 50%;
+  top: 50%;
+  z-index: 81;
+  width: min(420px, calc(100vw - 32px));
+  transform: translate(-50%, -50%);
+  border-radius: 16px;
+  padding: 20px;
+}
+
 .dark .entry-editor-backdrop {
+  background: rgb(0 0 0 / 0.34);
+}
+
+.dark .notice-toast {
+  box-shadow: 0 8px 24px rgb(0 0 0 / 0.3);
+}
+
+.dark .confirm-backdrop {
   background: rgb(0 0 0 / 0.34);
 }
 
@@ -1319,7 +1355,7 @@ button {
   }
 
   .workspace-shell {
-    min-height: 100vh;
+    min-height: 100dvh;
     border-radius: 0;
     border-left: 0;
     border-right: 0;
