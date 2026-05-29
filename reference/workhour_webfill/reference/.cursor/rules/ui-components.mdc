@@ -1,0 +1,100 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# UI组件使用指南
+
+## 基础组件
+
+### Button组件 ([button.tsx](mdc:components/ui/button.tsx))
+```typescript
+// 基础用法
+<Button onClick={handleClick}>点击按钮</Button>
+
+// 支持的variants（注意：当前实现可能不支持，需要修复）
+<Button variant="outline">轮廓按钮</Button>
+<Button variant="ghost">幽灵按钮</Button>
+
+// 大小控制（注意：当前实现可能不支持，需要修复）
+<Button size="sm">小按钮</Button>
+<Button size="lg">大按钮</Button>
+```
+
+### Input组件 ([input.tsx](mdc:components/ui/input.tsx))
+```typescript
+// 基础用法
+<Input 
+  value={value}
+  onChange={(e) => setValue(e.target.value)}
+  placeholder="请输入内容"
+/>
+
+// 数字输入
+<Input 
+  type="number"
+  min="1"
+  max="10"
+  value={numberValue}
+  onChange={(e) => setNumberValue(Number(e.target.value))}
+/>
+```
+
+### Card组件 ([card.tsx](mdc:components/ui/card.tsx))
+```typescript
+// 标准卡片布局
+<Card>
+  <CardHeader>
+    <CardTitle>卡片标题</CardTitle>
+  </CardHeader>
+  <CardContent>
+    卡片内容
+  </CardContent>
+</Card>
+```
+
+### Tabs组件 ([tabs.tsx](mdc:components/ui/tabs.tsx))
+```typescript
+// 标签页组件
+<Tabs defaultValue="tab1">
+  <TabsList>
+    <TabsTrigger value="tab1">标签1</TabsTrigger>
+    <TabsTrigger value="tab2">标签2</TabsTrigger>
+  </TabsList>
+  <TabsContent value="tab1">
+    标签1内容
+  </TabsContent>
+  <TabsContent value="tab2">
+    标签2内容
+  </TabsContent>
+</Tabs>
+```
+
+## 常见问题修复
+
+### Button组件类型错误
+当前[app/page.tsx](mdc:app/page.tsx)中存在Button组件的类型错误：
+- `variant` 和 `size` 属性可能未在Button组件中正确定义
+- 需要检查[components/ui/button.tsx](mdc:components/ui/button.tsx)的类型定义
+
+### 图标组件问题
+- 确保 `lucide-react` 已正确安装
+- 图标导入格式：`import { IconName } from "lucide-react"`
+
+## 样式约定
+
+### 响应式设计
+- 使用 `grid-cols-1 md:grid-cols-2 lg:grid-cols-3` 等响应式网格
+- 移动端优先：`mb-4 md:mb-6 lg:mb-8`
+
+### 颜色系统
+- 主色调：蓝色渐变 `from-blue-500 to-blue-600`
+- 成功色：绿色渐变 `from-green-500 to-green-600`
+- 警告色：红色渐变 `from-red-500 to-red-600`
+- 辅助色：紫色渐变 `from-purple-500 to-purple-600`
+
+### 交互效果
+- 悬停效果：`hover:shadow-lg transition-all duration-200`
+- 圆角统一：`rounded-xl` 或 `rounded-2xl`
+- 阴影层次：`shadow-sm` -> `shadow-lg` -> `shadow-xl`
+

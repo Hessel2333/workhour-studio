@@ -1,0 +1,39 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 工时表生成器项目概览
+
+## 项目简介
+这是一个基于 Next.js 14 的工时统计表生成器项目，主要功能是帮助用户快速生成标准格式的Excel工时统计表。
+
+## 核心功能
+- 工时表自动生成：支持按月生成半小时为单位的工时统计表
+- 工作模板系统：支持随机时段工作内容配置，可设置权重
+- 固定安排管理：支持固定时间段的工作安排
+- 周末讲堂配置：特殊的周六工作安排管理
+- 配置导入导出：支持JSON格式的配置文件导入导出
+- 日历视图：可视化展示工作日、周末和讲堂安排
+
+## 技术栈
+- **框架**: Next.js 14 (App Router)
+- **UI**: React 18 + TypeScript
+- **样式**: TailwindCSS + Radix UI组件
+- **Excel处理**: XLSX库
+- **图标**: Lucide React
+
+## 核心文件
+- [app/page.tsx](mdc:app/page.tsx) - 主要页面组件，包含所有核心逻辑
+- [components/ui/](mdc:components/ui) - UI组件库
+- [package.json](mdc:package.json) - 项目依赖配置
+- [tailwind.config.js](mdc:tailwind.config.js) - 样式配置
+
+## 数据结构
+项目使用以下主要接口：
+- `RandomWorkItem` - 随机时段工作内容
+- `FixedWorkItem` - 固定时段工作内容  
+- `WeekendLecture` - 周末讲堂配置
+- `WeekendLectureTemplate` - 周末讲堂模板
+- `ExcelRow` - Excel数据行格式
+

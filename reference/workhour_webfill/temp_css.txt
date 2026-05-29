@@ -1,0 +1,12 @@
+            .work-preview-modal { position: fixed; top: 50%; left: 50%; transform: translate(-50%, -50%); background: white; padding: 20px; border-radius: 8px; box-shadow: 0 4px 24px rgba(0,0,0,0.2); z-index: 10000; width: 95%; max-width: 1300px; max-height: 90vh; display: flex; flex-direction: column; transition: all 0.3s ease; }
+            .work-preview-modal.minimized { width: 40px; height: 40px; padding: 0; left: auto; right: 20px; top: 200px; transform: none; overflow: hidden; border-radius: 50%; cursor: pointer; background: #1890ff; }
+            .work-preview-modal.minimized .preview-header, 
+            .work-preview-modal.minimized .preview-controls, 
+            .work-preview-modal.minimized .preview-content, 
+            .work-preview-modal.minimized .preview-footer { display: none; }
+            .work-preview-modal.minimized::after { content: '📋'; display: flex; justify-content: center; align-items: center; width: 100%; height: 100%; color: white; font-size: 20px; }
+            .work-preview-modal.minimized:hover { transform: scale(1.1); box-shadow: 0 4px 12px rgba(24, 144, 255, 0.5); }
+            .preview-table { width: 100%; border-collapse: collapse; font-size: 12px; }
+            .preview-table th, .preview-table td { border: 1px solid #ddd; padding: 8px; }
+            .preview-table th { background-color: #f5f5f5; }
+            .maximize-btn { display: none; }

@@ -1,0 +1,1813 @@
+var msgList = {
+	'usernameEmpty': {
+		'zh': '请填写账号',
+		'en': 'Please enter username'
+	},
+	'passwordEmpty': {
+		'zh': '请填写密码',
+		'en': 'Please enter password'
+	},
+	'phoneNumberError': {
+		'zh': '请填写正确格式的手机号',
+		'en': 'Please enter valid phone number'
+	},
+	'phoneNumberEmpty': {
+		'zh': '请填写手机号',
+		'en': 'Please enter phone number'
+	},
+	'phoneCaptchaEmpty': {
+		'zh': '请填写验证码',
+		'en': 'Please enter captcha'
+	},
+	'checkCaptchaError': {
+		'zh': '验证码错误',
+		'en': 'Invalid captcha'
+	},
+	'dynamicId': {
+		'zh': '请填写动态ID',
+		'en': 'Please enter dynamic ID'
+	},
+	'meetingId': {
+		'zh': '请填写正确的会议室ID，仅支持数字和字母',
+		'en': 'Please enter currect Meeting ID, only supports numbers and letters'
+	},
+	'1': {
+		'zh': '您输入的手机号码不能进行短信认证，如有需要，请联系管理员',
+		'en': 'The phone number you entered can not be SMS authentication, if necessary, contact the administrator.'
+	},
+	'2': {
+		'zh': '已超过每天发送短信个数限制',
+		'en': 'The number of messages sent daily limit has been exceeded.'
+	},
+	'3': {
+		'zh': '认证策略中没有配置短信服务器',
+		'en': 'The SMS server is not configured in the certification policy.'
+	},
+	'4': {
+		'zh': '找不到服务器',
+		'en': 'Server not found.'
+	},
+	'5': {
+		'zh': '短信内容配置错误',
+		'en': 'SMS content configuration error.'
+	},
+	'6': {
+		'zh': '发送失败',
+		'en': 'Send failure.'
+	},
+	'changepassword': {
+		'inputUsername': {
+			'zh': '请输入用户名',
+			'en': 'Please input username'
+		},
+		'inputOldPassword': {
+			'zh': '请输入旧密码',
+			'en': 'Please input old password'
+		},
+		'inputNewPassword': {
+			'zh': '请输入新密码',
+			'en': 'Please input new password'
+		},
+		'confirmPassword': {
+			'zh': '请确认密码',
+			'en': 'Please confirm password'
+		},
+		'wrongConfirmPassword': {
+			'zh': '两次输入的密码不一致',
+			'en': 'Passwords do not match'
+		},
+		'diffName': {
+			'zh': '新密码不能与用户名相同',
+			'en': 'The new password cannot be the same as the username'
+		},
+		'diffOld': {
+			'zh': '新密码不能与旧密码相同',
+			'en': 'The new password cannot be the same as the original password'
+		},
+		'minLength': {
+			'zh': '密码长度须大于{0}位',
+			'en': 'Password length must be greater than {0}'
+		},
+		'numberAndAphabet': {
+			'zh': '密码必须包含数字和字母',
+			'en': 'Password must contain numbers and letters'
+		},
+		'lowerAndUppercase': {
+			'zh': '密码必须包含大小写字母',
+			'en': 'Password must contain uppercase and lowercase letters'
+		},
+		'specialCharacters': {
+			'zh': '密码必须包含特殊字符（shift+数字）',
+			'en': 'Password must contain special characters (shift+number)'
+    }
+  },
+  'errorTitle': {
+    'zh': '提示',
+    'en': 'Prompt'
+  },
+  'confirm': {
+    'zh': '确定',
+    'en': 'Confirm'
+	},
+	alert_tip: {
+		'zh': '手机号未绑定或账号异常',
+		'en': 'The mobile phone number is not bound or the account number is abnormal'
+	}
+};
+var errorMsg = function (msg) {
+  layer.open({
+    title: msgList.errorTitle[api_cfg.language],
+    closeBtn: 0,
+    btn: msgList.confirm[api_cfg.language],
+    skin: 'layui-layer-rim', //加上边框
+    content: msg,
+    // yes: function (index, layero) {
+    //   layer.close(index); //如果设定了yes回调，需进行手工关闭
+    // }
+  });
+}
+var timeTicket = {};
+var currentSelectedPanelWithInput = 'account'
+/**隐藏所有面板**/
+function hideAll() {
+	// $('#login_panel').children('li').each(function () {
+	// 	$(this).hide();
+	// });
+
+// $('#login_type').show();
+// $('.icon').each(function () {
+// 	$(this).show();
+// });
+
+	$('[placeholder]').focus(function () {
+		var input = $(this);
+		if (input.val() == input.attr('placeholder')) {
+			input.val('');
+			input.removeClass('placeholder');
+		}
+	}).blur(function () {
+		var input = $(this);
+		if (input.val() == '' || input.val() == input.attr('placeholder')) {
+			input.addClass('placeholder');
+			// input.val(input.attr('placeholder'));
+		}
+	}).blur().parents('form').submit(function () {
+		$(this).find('[placeholder]').each(function () {
+			var input = $(this);
+			if (input.val() == input.attr('placeholder')) {
+				input.val('');
+			}
+		})
+	});
+
+	$("input[name=oldPwdLabel]").focus(function () {
+		$("input[name=oldPwdLabel]").hide();
+		$("input[name=oldPwd]").show().focus();
+	});
+	$("input[name=oldPwd]").blur(function () {
+		if ($(this).val() == "") {
+			$("input[name=oldPwdLabel]").show();
+			$("input[name=oldPwd]").hide();
+		}
+	})
+	$("input[name=newPwdLabel]").focus(function () {
+		$("input[name=newPwdLabel]").hide();
+		$("input[name=newPwd]").show().focus();
+	});
+	$("input[name=newPwd]").blur(function () {
+		if ($(this).val() == "") {
+			$("input[name=newPwdLabel]").show();
+			$("input[name=newPwd]").hide();
+		}
+	})
+	$("input[name=confirmPwdLabel]").focus(function () {
+		$("input[name=confirmPwdLabel]").hide();
+		$("input[name=confirmPwd]").show().focus();
+	});
+	$("input[name=confirmPwd]").blur(function () {
+		if ($(this).val() == "") {
+			$("input[name=confirmPwdLabel]").show();
+			$("input[name=confirmPwd]").hide();
+		}
+	})
+	$("input[name=pwdLabel]").focus(function () {
+		$("input[name=pwdLabel]").hide();
+		$("input[name=pwd]").show().focus();
+	});
+	$("input[name=pwd]").blur(function () {
+		if ($(this).val() == "") {
+			$("input[name=pwdLabel]").show();
+			$("input[name=pwd]").hide();
+		}
+	})
+}
+/**微信认证面板**/
+function wechat_panel() {
+	hideAll();
+	// $(".icon-wechat-gray").hide();
+	var authparam = getAuthParam();
+	var isDynamic = authparam.scene_type === 'scan';
+	var wx_original_id = authparam.wx_original_id;
+	if (!window.wechat_name_flag && authparam.name) {
+		var ori_html = $('#wx_panel_content').html();
+		$('#wx_panel_content').html(ori_html + authparam.name);
+		window.wechat_name_flag = true
+	}
+	if (api_cfg.terminal === 'pc') {
+		if (isDynamic) { //微信认证
+			var wx_dynamic_qrcode_panel = $('#wx_dynamic_qrcode_panel');
+			if (wx_dynamic_qrcode_panel) {
+				wx_dynamic_qrcode_panel.show();
+				WB2.anyWhere(function (W) {
+					//数据交互
+					W.parseCMD("auth/getWxQRcodeImg", {
+						method: 'post'
+					}, {
+						el: 'wx_dynamic_qrcode_img',
+						parent_node: 'wx_dynamic_qrcode_div'
+					}, function (sResult, bStatus) {
+						if (bStatus == true) { }
+					});
+				});
+			}
+		} else { //带验证码的微信认证
+			var wx_static_qrcode_panel = $('#wx_static_qrcode_panel');
+			if (wx_static_qrcode_panel) {
+				wx_static_qrcode_panel.show();
+				if (wx_original_id) {
+					$("#wx_static_qrcode_img").attr('src', '/images/qrcode/' + wx_original_id + '_qrcode.jpg');
+				}
+			}
+		}
+	} else if (api_cfg.terminal === 'mobile') {
+		var wx_panel = $('#wx_panel')
+		wx_panel && wx_panel.show();
+	}
+}
+
+$('#wx_static_login_button').click(function () {
+	var wx_captcha = $('#wx_captcha').val();
+	if (!wx_captcha) {
+		$('#wx_captcha').addClass('has-error');
+		layer.msg(msgList.phoneCaptchaEmpty[api_cfg.language]);
+		return false;
+	}
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/wxlogin", {
+			method: 'post'
+		}, {
+			wx_captcha: wx_captcha
+		}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+/**短信认证面板**/
+function sms_panel(cookie) {
+	hideAll();
+	$("#sms_panel").show();
+	cookie && setSmsCodeCookie('get_smscode_button')
+}
+//为获取验证码按钮绑定获取短信验证码接口
+$('#get_smscode_button').click(function () {
+	var smsusername = $('#smsusername').val();
+	if (!smsusername) {
+		$('#smsusername').addClass('has-error');
+		layer.msg(msgList.phoneNumberEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!checkMobile(smsusername)) {
+		$('#smsusername').addClass('has-error');
+		layer.msg(msgList.phoneNumberError[api_cfg.language]);
+		return false;
+	}
+	SetCookie('get_smscode_button', 60, 60)
+	SetCookie('get_smscode_button_check', true, 60)
+	setSmsCodeCookie('get_smscode_button')
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/getsmscode", {
+			method: 'post'
+		}, {
+			phoneNumber: smsusername,
+			type: 'sms'
+		}, function (sResult, bStatus) {
+			if (sResult) {
+				layer.msg(sResult)
+			}
+		});
+	});
+});
+// 快捷认证-短信获取验证码
+$('#quick_get_smscode_button').click(function () {
+	var smsusername = $('#quick_smsusername').val();
+	if (!smsusername) {
+		$('#quick_smsusername').addClass('has-error');
+		layer.msg(msgList.phoneNumberEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!checkMobile(smsusername)) {
+		$('#quick_smsusername').addClass('has-error');
+		layer.msg(msgList.phoneNumberError[api_cfg.language]);
+		return false;
+	}
+	SetCookie('quick_get_smscode_button', 60, 60)
+	SetCookie('quick_get_smscode_button_check', true, 60)
+	setSmsCodeCookie('quick_get_smscode_button')
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/getsmscode", {
+			method: 'post'
+		}, {
+			phoneNumber: smsusername,
+			type: 'sms'
+		}, function (sResult, bStatus) {
+			if (sResult) {
+				layer.msg(sResult)
+			}
+		});
+	});
+});
+
+//为登录按钮短信登录接口
+$('#sms_login_button').click(function () {
+	var smsusername = $('#smsusername').val();
+	var smspassword = $('#smspassword').val();
+	if (!smsusername) {
+		$('#smsusername').addClass('has-error');
+		layer.msg(msgList.phoneNumberEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!smspassword) {
+		$('#smspassword').addClass('has-error');
+		layer.msg(msgList.phoneCaptchaEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!checkMobile(smsusername)) {
+		$('#smsusername').addClass('has-error');
+		layer.msg(msgList.phoneNumberError[api_cfg.language]);
+		return false;
+	}
+	if (__WEBCONFIG.enableDisclaimer) {
+		var checked = $('#disclaimer_sms input').prop('checked');
+		if (!checked) {
+			$('#disclaimer_sms span').css('color', 'red');
+			$('#disclaimer_sms .ant-checkbox-inner').css('border-color', 'red');
+			return false;
+		}
+	}
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/smslogin", {
+			method: 'post'
+		}, {
+			phoneNumber: $('#smsusername').val(),
+			captcha: $('#smspassword').val()
+		}, function (sResult, bStatus) {
+		});
+	});
+});
+// 手机号改变隐藏立即绑定
+$('#quick_smsusername').change(function () {
+  $('#sms_alert_warn').hide()
+});
+$('#sms_alert_tip').click(function () {
+	errorMsg(msgList.alert_tip[api_cfg.language])
+});
+//快捷认证-短信登录按钮
+$('#quick_sms_login_button').click(function () {
+  if (window.clearQuickInterval) {
+    window.clearQuickInterval()
+    window.clearQuickInterval = null
+  }
+	var smsusername = $('#quick_smsusername').val();
+	var smspassword = $('#quick_smspassword').val();
+	if (!smsusername) {
+		$('#quick_smsusername').addClass('has-error');
+		layer.msg(msgList.phoneNumberEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!smspassword) {
+		$('#quick_smspassword').addClass('has-error');
+		layer.msg(msgList.phoneCaptchaEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!checkMobile(smsusername)) {
+		$('#quick_smsusername').addClass('has-error');
+		layer.msg(msgList.phoneNumberError[api_cfg.language]);
+		return false;
+	}
+	if (__WEBCONFIG.enableDisclaimer) {
+		var checked = $('#quick_disclaimer_sms input').prop('checked');
+		if (!checked) {
+			$('#quick_disclaimer_sms span').css('color', 'red');
+			$('#quick_disclaimer_sms .ant-checkbox-inner').css('border-color', 'red');
+			return false;
+		}
+	}
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/smslogin", {
+			method: 'post'
+		}, {
+			phoneNumber: smsusername,
+			captcha: smspassword,
+			login_type: 'pre_sms_bind'
+    }, function (sResult, bStatus, CFG) {
+      $("#sms_alert_warn").hide()
+      if (bStatus) {
+        if (sResult.is_sms_bind && !sResult.errmsg) {
+          var url = window.location.origin + "/login?original_url=" + CFG.uri + "&terminal=" + api_cfg.terminal + "&page_language=" + api_cfg.language;
+          window.location.href = url
+        } else {
+          if (sResult.errmsg) {
+            errorMsg(sResult.errmsg)
+          }
+          if (!sResult.is_sms_bind) {
+            $("#sms_alert_warn").show()
+          }
+        }
+      } else {
+        sResult && errorMsg(sResult)
+      }
+		});
+	});
+});
+
+// 微信快捷登录面板
+function wx_quick_panel() {
+  if (document.getElementById('wx_quick_code_img')) {
+    WB2.anyWhere(function (W) {
+      //数据交互
+      W.parseCMD("auth/getWxQuickQRcodeImg", {
+        method: 'post'
+      }, {
+        el: 'wx_quick_code_img', //二维码图片的id
+        parent_node: 'wx_quick_code_div' //二维码显示的父节点的位置
+      }, function (sResult, bStatus, CFG) {
+        $("#wx_alert_warn").hide()
+        if (sResult.is_wechat_bind && !sResult.errmsg) {
+          var url = window.location.origin + "/login?original_url=" + CFG.uri;
+          window.location.href = url
+        } else {
+          if (sResult.errmsg) {
+            errorMsg(sResult.errmsg)
+						const imgsrc = "./images/" + (CFG.language == 'en' ? 'en_' : '') + "qrcode_failure.gif"
+						$('#wx_quick_code_img').attr('src', imgsrc)
+          }
+          if (!sResult.is_wechat_bind) {
+            $("#wx_alert_warn").show()
+            $("#wechat_uid").val(sResult.wechat_uid)
+          }
+        }
+      });
+    });
+  }
+}
+// 短信/微信快捷登录面板显示逻辑
+function showActiveTab(id) {
+  $('#quick_auth_tab1').removeClass('ant-tabs-tab-active')
+  $('#quick_auth_tab2').removeClass('ant-tabs-tab-active')
+  $('#quick_auth_tab3').removeClass('ant-tabs-tab-active')
+  $(id).addClass('ant-tabs-tab-active')
+  $("#quick_auth_tab1_body").hide();
+  $("#quick_auth_tab2_body").hide();
+  $("#quick_auth_tab3_body").hide();
+  if (window.clearQuickInterval) {
+    window.clearQuickInterval()
+    window.clearQuickInterval = null
+  }
+  $(id + "_body").show();
+  if (id == '#quick_auth_tab3') {
+    wx_quick_panel()
+  }
+}
+$('#quick_auth_tab1').click(function () {
+	showActiveTab('#quick_auth_tab1')
+	currentSelectedPanelWithInput = 'quick_account';
+
+})
+$('#quick_auth_tab2').click(function () {
+	showActiveTab('#quick_auth_tab2')
+	currentSelectedPanelWithInput = 'quick_sms';
+
+})
+$('#quick_auth_tab3').click(function () {
+	showActiveTab('#quick_auth_tab3')
+	currentSelectedPanelWithInput = '';
+})
+//pc端---短信快捷登录-立即处理
+$('#sms_quick_process').click(function () {
+	var number = $('#quick_smsusername').val()
+	var captcha = $('#quick_smspassword').val()
+	show_sms_bind_panel()
+	$("#sms_number").text(number);
+	$("#sms_username").val('');
+	$("#sms_password").val('');
+	$("#sms_captcha").val(captcha);
+})
+//移动端---短信快捷登录-立即处理
+$('#mobile_sms_quick_process').click(function () {
+	var number = $('#quick_smsusername').val()
+	var captcha = $('#quick_smspassword').val()
+	show_mobile_sms_bind_panel()
+	$("#sms_number").text(number);
+	$("#sms_username").val('');
+	$("#sms_password").val('');
+	$("#sms_captcha").val(captcha);
+})
+// pc端---手机绑定及登录界面
+function show_sms_bind_panel() {
+	$('#ant-spin-container').hide()
+  $('#sms_bind').show()
+	currentSelectedPanelWithInput = 'sms_bind'
+}
+// 移动端---手机绑定及登录界面
+function show_mobile_sms_bind_panel() {
+	$('#ant-modal-content').hide()
+  $('#sms_bind').show()
+	currentSelectedPanelWithInput = 'sms_bind'
+}
+//pc端---微信快捷登录-立即处理
+$('#wx_quick_process').click(function () {
+  var number = $('#wechat_uid').val()
+  show_wx_bind_panel()
+  $("#wx_number").text(number);
+  $("#wx_username").val('');
+  $("#wx_password").val('');
+})
+// PC端---微信号绑定及登录界面
+function show_wx_bind_panel() {
+	$('#ant-spin-container').hide()
+  $('#wx_bind').show()
+	currentSelectedPanelWithInput = 'wx_bind'
+}
+// 移动端---微信号绑定及登录界面
+function show_mobile_wx_bind_panel(number) {
+	$('#ant-modal-content').hide()
+  $('#wx_bind').show()
+	$("#wx_number").text(number);
+	$("#wx_username").val('');
+	$("#wx_password").val('');
+	currentSelectedPanelWithInput = 'wx_bind'
+}
+//移动端---微信快捷登录-前往绑定微信
+$('#bind_wx_button').click(function () {
+	show_mobile_wx_bind_panel()
+})
+//移动端---微信快捷登录-已绑定微信，直接登录
+$('#wx_login_button').click(function () {
+//todo
+})
+
+//手机绑定及登录-绑定并登录
+$('#sms_bind_login_button').click(function () {
+	var assure_phone = $('#sms_number').text();
+	var username = $('#sms_username').val();
+	var password = $('#sms_password').val();
+	var captcha = $("#sms_captcha").val();
+	if (!username) {
+		$('#sms_username').addClass('has-error');
+		layer.msg(msgList.usernameEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!password) {
+		$('#sms_password_label').addClass('has-error');
+		layer.msg(msgList.passwordEmpty[api_cfg.language]);
+		return false;
+	}
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/login", {
+			method: 'post'
+		}, {
+			username: username,
+			password: password,
+			assure_phone: assure_phone,
+			login_type: 'sms_bind',
+			captcha: captcha
+    }, function (sResult, bStatus, CFG) {
+      if (bStatus == true) {
+        if (sResult.errmsg) {
+          errorMsg(sResult.errmsg)
+        } else {
+          var url = window.location.origin + "/login?original_url=" + CFG.uri + "&terminal=" + api_cfg.terminal + "&page_language=" + api_cfg.language;
+          window.location.href = url
+        }
+      } else {
+        sResult && errorMsg(sResult)
+      }
+		});
+	});
+});
+//微信号绑定及登录-绑定并登录
+$('#wx_bind_login_button').click(function () {
+	var phone = $('#wx_number').text();
+	var username = $('#wx_username').val();
+	var password = $('#wx_password').val();
+	if (!username) {
+		$('#wx_username').addClass('has-error');
+		layer.msg(msgList.usernameEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!password) {
+		$('#wx_password_label').addClass('has-error');
+		layer.msg(msgList.passwordEmpty[api_cfg.language]);
+		return false;
+	}
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/login", {
+			method: 'post'
+		}, {
+			username: username,
+			password: password,
+			phone: phone,
+			login_type: 'wechat_bind'
+    }, function (sResult, bStatus, CFG) {
+      if (bStatus == true) {
+        if (sResult.errmsg) {
+          errorMsg(sResult.errmsg)
+        } else {
+          var url = window.location.origin + "/login?original_url=" + CFG.uri;
+          window.location.href = url
+        }
+      } else {
+        sResult && errorMsg(sResult)
+      }
+		});
+	});
+});
+
+/**账号认证面板**/
+function web_panel(cookie) {
+	var showAll = GetQueryString('showAll')
+  // var authparam = getAuthParam() || { sms_bind: false, webchat_bind: false }
+  var authparam = getAuthParam() || {}
+	var sms_bind = authparam.sms_bind
+	var webchat_bind = authparam.webchat_bind
+  if (sms_bind || webchat_bind || showAll) {
+		$("#quick_auth_panel").show();
+    if ((sms_bind && webchat_bind) || showAll) {
+      if (document.getElementById('quick_auth_tab3')) {
+        showActiveTab('#quick_auth_tab3');
+        currentSelectedPanelWithInput = '';
+      } else {
+        showActiveTab('#quick_auth_tab2');
+        currentSelectedPanelWithInput = 'quick_sms';
+      }
+      $('.ant-tabs-nav .ant-tabs-tab').css('width', null);
+		}
+    if (sms_bind && !webchat_bind) {
+			$("#quick_auth_tab3").hide();
+      showActiveTab('#quick_auth_tab2');
+      $('.ant-tabs-nav .ant-tabs-tab').css('width', '156px');
+			currentSelectedPanelWithInput = 'quick_sms';
+		}
+		if (!sms_bind && webchat_bind) {
+			$("#quick_auth_tab2").hide();
+      if (document.getElementById('quick_auth_tab3')) {
+        showActiveTab('#quick_auth_tab3');
+        currentSelectedPanelWithInput = '';
+      } else {
+        $("#quick_auth_panel").hide();
+        var isShowPwd = isForceChangePwd();
+        if (isShowPwd) {
+          $('#changepwd_panel').show();
+        } else {
+          $("#account_panel").show();
+        }
+      }
+      $('.ant-tabs-nav .ant-tabs-tab').css('width', '156px');
+		}
+		if (cookie) {
+			cookie && setSmsCodeCookie('quick_get_smscode_button')
+		}
+	} else {
+    var isShowPwd = isForceChangePwd();
+    if (isShowPwd) {
+      $('#account_panel').hide();
+      $('#changepwd_panel').show();
+    } else {
+      $("#account_panel").show();
+    }
+	}
+// $(".icon-account-gray").hide();
+}
+
+$('#change_password_button').click(function () {
+	var username = $('#username_change').val();
+	var old_password = $('#old_password').val();
+	var new_password = $('#new_password').val();
+	var new_password_confirm = $('#new_password_confirm').val();
+	var lang = api_cfg.language || 'zh'
+
+	try {
+		if (!username) {
+			$('#username_change').addClass('has-error');
+			throw msgList.changepassword.inputUsername[lang]
+		}
+		if (!old_password) {
+			$('#old_password').addClass('has-error');
+			throw msgList.changepassword.inputOldPassword[lang]
+		}
+		if (!new_password) {
+			$('#new_password').addClass('has-error');
+			throw msgList.changepassword.inputNewPassword[lang]
+		}
+		if (!new_password_confirm) {
+			$('#new_password_confirm').addClass('has-error');
+			throw msgList.changepassword.confirmPassword[lang]
+		}
+		if (new_password !== new_password_confirm) {
+			$('#new_password').addClass('has-error');
+			$('#new_password_confirm').addClass('has-error');
+			throw msgList.changepassword.wrongConfirmPassword[lang]
+		}
+		var rules = __WEBCONFIG.passwordRules || {};
+		if (rules.diffName && username == new_password) {
+			throw msgList.changepassword.diffName[lang]
+		}
+		if (rules.diffOld && old_password == new_password) {
+			throw msgList.changepassword.diffOld[lang]
+		}
+		if (rules.minLength && new_password.length < rules.minLength) {
+			throw msgList.changepassword.minLength[lang].replace('{0}', rules.minLength)
+		}
+		if (rules.numberAndAphabet && !(/([a-zA-Z])+/.test(new_password) && /\d+/.test(new_password))) {
+			throw msgList.changepassword.numberAndAphabet[lang]
+		}
+		if (rules.lowerAndUppercase && !(/([a-z])+/.test(new_password) && /([A-Z])+/.test(new_password))) {
+			throw msgList.changepassword.lowerAndUppercase[lang]
+		}
+		if (rules.specialCharacters && !/([!@#$%^&*()])+/.test(new_password)) {
+			throw msgList.changepassword.specialCharacters[lang]
+		}
+	} catch (error) {
+		layer.msg(error);
+		return false;
+	}
+
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/changepwd", {
+			method: 'post'
+		}, {
+			username: $('#username_change').val(),
+			password: $('#old_password').val(),
+			new_password: $('#new_password').val()
+		}, function (sResult, bStatus) {
+			layer.msg(sResult.value)
+      if (bStatus == true && sResult.fail == '104') {
+        $('#changepwd_panel,#back_account').hide();
+        $('#account_panel').show();
+      }
+		});
+	});
+});
+//为登录按钮绑定账号接口
+$('#login_button').click(function () {
+	var username = $('#username').val();
+	var password = $('#password').val();
+	if (!username) {
+		$('#username').addClass('has-error');
+		layer.msg(msgList.usernameEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!password) {
+		$('#password').addClass('has-error');
+		layer.msg(msgList.passwordEmpty[api_cfg.language]);
+		return false;
+	}
+
+	if (__WEBCONFIG.enableDisclaimer) {
+		var checked = $('#disclaimer_account input').prop('checked');
+		if (!checked) {
+			$('#disclaimer_account span').css('color', 'red');
+			$('#disclaimer_account .ant-checkbox-inner').css('border-color', 'red');
+			return false;
+		}
+	}
+  if (GetCookie('username') == null || GetCookie('password') == null || GetCookie('remember_account') == null) {
+		DelCookie('username')
+		DelCookie('password')
+		DelCookie('remember_account')
+  }
+  // && (GetCookie('password') !== null && GetCookie('password') !== md6(password))
+  if (
+    ((GetCookie('password') !== null && GetCookie('password') !== password))
+    || (GetCookie('remember_account') + '' == 'true' && GetCookie('password') == null)
+  ) {
+		DelCookie('password')
+    password = md6(password);
+    $('#password').val(password);
+    SetCookie('password',  password);
+  }
+	if ($('#remember_account input').prop('checked')) {
+		SetCookie('username', username);
+    if (GetCookie('remember_account') + '' !== 'true') {
+      password = md6(password);
+      $('#password').val(password);
+      SetCookie('password',  password);
+    };
+		SetCookie('remember_account', true)
+	} else {
+		DelCookie('username')
+		DelCookie('password')
+		DelCookie('remember_account')
+	}
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/login", {
+			method: 'post'
+		}, {
+			username: username,
+			password: password,
+      isMd6Pwd: GetCookie('remember_account') + '' == 'true',
+		}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+//快捷认证-账号登录按钮
+$('#quick_login_button').click(function () {
+  if (window.clearQuickInterval) {
+    window.clearQuickInterval()
+    window.clearQuickInterval = null
+  }
+	var username = $('#quick_username').val();
+	var password = $('#quick_password').val();
+	if (!username) {
+		$('#quick_username').addClass('has-error');
+		layer.msg(msgList.usernameEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!password) {
+		$('#quick_password').addClass('has-error');
+		$('#quick_password_label').addClass('has-error');
+		layer.msg(msgList.passwordEmpty[api_cfg.language]);
+		return false;
+	}
+	if (__WEBCONFIG.enableDisclaimer) {
+		var checked = $('#quick_disclaimer_account input').prop('checked');
+		if (!checked) {
+			$('#quick_disclaimer_account span').css('color', 'red');
+			$('#quick_disclaimer_account .ant-checkbox-inner').css('border-color', 'red');
+			return false;
+		}
+	}
+  if (
+    GetCookie('quick_username') == null
+    || GetCookie('quick_password') == null
+    || GetCookie('quick_remember_account') == null
+  ) {
+		DelCookie('quick_username')
+		DelCookie('quick_password')
+		DelCookie('quick_remember_account')
+  }
+  if (
+    (GetCookie('quick_password') !== null && GetCookie('quick_password') !== password)
+    || (GetCookie('quick_remember_account') + '' == 'true' && GetCookie('quick_password') == null)
+  ) {
+		DelCookie('quick_password')
+    password = md6(password);
+    $('#quick_password').val(password);
+    SetCookie('quick_password',  password);
+  }
+	if ($('#quick_remember_account input').prop('checked')) {
+		SetCookie('quick_username', username);
+    if (GetCookie('quick_remember_account') + '' !== 'true') {
+      password = md6(password);
+      $('#quick_password').val(password);
+      SetCookie('quick_password', password);
+    };
+		SetCookie('quick_remember_account', true)
+	} else {
+		DelCookie('quick_username')
+		DelCookie('quick_password')
+		DelCookie('quick_remember_account')
+	}
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/login", {
+			method: 'post'
+		}, {
+			username: username,
+			password: password,
+      isMd6Pwd: GetCookie('quick_remember_account') + '' == 'true',
+		}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+function noaccount_panel() {
+	hideAll();
+	$("#no_account_panel").show();
+// $(".icon-noaccount-gray").hide();
+}
+
+//为立即连接按钮绑定无账号认证接口
+$('#no_account_button').click(function () {
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/noaccount", {
+			method: 'get'
+		}, {}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+
+function lanxin_panel() {
+	hideAll();
+	$("#lanxin_panel").show();
+}
+
+//钉钉立即跳转按钮
+$('#lanxin_button').click(function () {
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/lanxin", {
+			method: 'post'
+		}, {}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+function enterpriseWeChat_panel() {
+	hideAll();
+	$("#enterpriseWeChat_panel").show();
+}
+
+//钉钉立即跳转按钮
+$('#enterpriseWeChat_button').click(function () {
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/enterpriseWeChat", {
+			method: 'post'
+		}, {}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+function dingTalk_panel() {
+	hideAll();
+	$("#dingTalk_panel").show();
+}
+
+//钉钉立即跳转按钮
+$('#dingTalk_button').click(function () {
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/dingTalk", {
+			method: 'post'
+		}, {}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+function kdzl_panel() {
+	hideAll();
+	$("#kdzl_panel").show();
+}
+
+//口袋助理立即跳转按钮
+$('#kdzl_button').click(function () {
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/kdzl", {
+			method: 'post'
+		}, {}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+function moa_panel() {
+	hideAll();
+	$("#moa_panel").show();
+}
+
+//moa立即跳转按钮
+$('#moa_button').click(function () {
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/moa", {
+			method: 'post'
+		}, {}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+function cas_panel() {
+	hideAll();
+	$("#cas_panel").show();
+}
+
+//cas立即跳转按钮
+$('#cas_button').click(function() {
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/casLogin", { method: 'post' }, {
+		}, function (sResult, bStatus) {
+			if (bStatus == true) {
+			}
+		});
+	});
+});
+
+/**奇安信ID面板**/
+function zero_panel(config) {
+	hideAll();
+	$("#zero_panel").show();
+}
+
+//为登录按钮零信任登录接口
+$('#zero_login_button').click(function () {
+	var zero_username = $('#zero_username').val();
+	var zero_password = $('#zero_password').val();
+	var dynamicId = $('#dynamicId').val();
+	if (!zero_username) {
+		$('#zero_username').addClass('has-error');
+		layer.msg(msgList.usernameEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!zero_password) {
+		$('#zero_password').addClass('has-error');
+		layer.msg(msgList.passwordEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!dynamicId) {
+		$('#dynamicId').addClass('has-error');
+		layer.msg(msgList.dynamicId[api_cfg.language]);
+		return false;
+	}
+
+	if (__WEBCONFIG.enableDisclaimer) {
+		var checked = $('#disclaimer_account input').prop('checked');
+		if (!checked) {
+			$('#disclaimer_account span').css('color', 'red');
+			$('#disclaimer_account .ant-checkbox-inner').css('border-color', 'red');
+			return false;
+		}
+	}
+	if ($('#remember_zero_account input').prop('checked')) {
+		SetCookie('zero_username', zero_username);
+    SetCookie('zero_password', zero_password);
+		SetCookie('remember_zero_account', true)
+	} else {
+		DelCookie('zero_username')
+		DelCookie('zero_password')
+		DelCookie('remember_zero_account')
+	}
+
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/zerologin", {
+			method: 'post'
+		}, {
+			username: zero_username,
+			password: zero_password,
+			dynamicId: dynamicId
+		}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+function custom_panel() {
+	hideAll();
+	$("#custom_panel").show();
+}
+
+//自定义OAUTH立即跳转按钮
+$('#custom_button').click(function () {
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/custom", {
+			method: 'post'
+		}, {}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+function meeting_panel() {
+	hideAll();
+	$("#meeting_panel").show();
+}
+
+//会议室二维码认证
+$('#meeting_button').click(function () {
+	var meetingId = $('#meeting_id').val();
+	if (!meetingId || !/^([a-zA-Z0-9])+$/.test(meetingId)) {
+		$('#meeting_id').addClass('has-error');
+		layer.msg(msgList.meetingId[api_cfg.language]);
+		return false;
+	}
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/meeting", {
+			method: 'post'
+		}, {
+			meetingId: meetingId
+		}, function () { }
+		);
+	});
+});
+
+/**一键免认证面板**/
+function wifi_panel(content) {
+	hideAll();
+	$("#login_panel, #login_type").hide();
+	$("#onekeyauth_panel").show();
+	$("#onekeyauth_panel span").html(content);
+}
+
+$('#onekeyauth_button').click(function() {
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/free", { method: 'post' }, {
+		}, function (sResult, bStatus) {
+			if (bStatus == true) {
+			}
+		});
+	});
+});
+
+function localqrcode_panel() {
+	hideAll();
+	var authparam = getAuthParam();
+	if (authparam.qrcode_visitor_register_first) {
+		$("#localqrcode_visitor_panel").show();
+	} else {
+		$("#localqrcode_panel").show();
+		WB2.anyWhere(function (W) {
+			//数据交互
+			W.parseCMD("auth/getQRcodeImg", {
+				method: 'post'
+			}, {
+				el: 'localqrcode_img', //二维码图片的id
+				parent_node: 'localqrcode_div' //二维码显示的父节点的位置
+			}, function (sResult, bStatus) {
+				if (bStatus == true) { }
+			});
+		});
+	}
+}
+
+$('#localqrcode_visitor_button').click(function() {
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/getRegisterpage", {
+			method: 'post'
+		}, {}, function (sResult, bStatus) {
+			if (bStatus == true) { }
+		});
+	});
+});
+
+/**微信连wifi认证面板**/
+var wxwifi_registered = false;
+var wxwifi_need_registered = false;
+function wxwifi_panel(cookie) {
+	hideAll();
+	$("#wxwifi_registered").hide();
+	if (wxwifi_registered) {
+		$("#wxwifi_registered").hide();
+	} else {
+		$.ajax({
+			type: "POST",
+			url: "/login",
+			data: "login_type=wxwifi_register_check",
+			dataType: 'json',
+			success: function (msg) {
+				wxwifi_registered = msg.wxwifi_registered || false;
+				wxwifi_need_registered = msg.wxwifi_need_registered || false;
+				if (!wxwifi_need_registered) {
+					$("#wxwifi_registered").hide();
+				} else if (wxwifi_need_registered && wxwifi_registered == false) {
+					$("#wxwifi_registered").show();
+					cookie && setSmsCodeCookie('get_smscode_button_wifi')
+				} else {
+					$("#wifi_username").val(msg.phone);
+					$("#wxwifi_registered").hide();
+				}
+			}
+		});
+	}
+	$("#wxwifi_panel").show();
+// noaccount_reset();
+}
+
+$('#get_smscode_button_wifi').click(function () {
+	var smsusername = $('#wifi_username').val();
+	if (!smsusername) {
+		$('#wifi_username').addClass('has-error');
+		layer.msg(msgList.phoneNumberEmpty[api_cfg.language]);
+		return false;
+	}
+	if (!checkMobile(smsusername)) {
+		$('#wifi_username').addClass('has-error');
+		layer.msg(msgList.phoneNumberError[api_cfg.language]);
+		return false;
+	}
+	SetCookie('get_smscode_button_wifi', 60, 60)
+	SetCookie('get_smscode_button_wifi_check', true, 60)
+	setSmsCodeCookie('get_smscode_button_wifi')
+	WB2.anyWhere(function (W) {
+		//数据交互
+		W.parseCMD("auth/getsmscode", {
+			method: 'post'
+		}, {
+			phoneNumber: smsusername,
+			type: 'wxwifi'
+		}, function (sResult, bStatus) {
+			if (sResult) {
+				layer.msg(sResult)
+			}
+		});
+	});
+});
+
+$('#wxwifi_login_button').click(function () {
+	wxwifi_login()
+});
+
+function checkMobile (v){
+	var reg = /^((\+?86)|(\(\+86\)))?1\d{10}$/;
+	if (!reg.test(v)) {
+		return false;
+	}
+	return true;
+}
+
+function wxwifi_login(){
+	if (!wxwifi_need_registered) {
+		Wechat_GotoRedirect();
+	} else if (wxwifi_registered) {
+		var phone = $("#wifi_username").val();
+		Wechat_GotoRedirect(phone);
+	} else {
+		var phone = $('#wifi_username').val();
+		var code = $('#wifi_password').val();
+		if (!phone) {
+			$('#wifi_username').addClass('has-error');
+			layer.msg(msgList.phoneNumberEmpty[api_cfg.language]);
+			return false;
+		}
+		if (!code) {
+			$('#wifi_password').addClass('has-error');
+			layer.msg(msgList.phoneCaptchaEmpty[api_cfg.language]);
+			return false;
+		}
+		if (!checkMobile(phone)) {
+			$('#wifi_username').addClass('has-error');
+			layer.msg(msgList.phoneNumberError[api_cfg.language]);
+			return false;
+		}
+		WB2.anyWhere(function (W) {
+			//数据交互
+			W.parseCMD("auth/wxwifiCodeCheck", {
+				method: 'post'
+			}, {
+				phoneNumber: phone,
+				captcha: code
+			}, function (msg) {
+				var wxwifi_code_passed = msg || false;
+				if (wxwifi_code_passed) {
+					wxwifi_registered = true;
+					Wechat_GotoRedirect(phone);
+				} else {
+					layer.msg(msgList.checkCaptchaError[api_cfg.language]);
+				}
+			});
+		});
+	}
+}
+
+$("#changepwd").click(function () {
+	$('#account_panel').hide();
+	$('#changepwd_panel,#back_account').show();
+})
+
+$("#back_account").click(function () {
+	$('#changepwd_panel,#back_account').hide();
+	$('#account_panel').show();
+})
+
+$("#quick_changepwd").click(function () {
+	$('#quick_auth_panel').hide();
+	$('#changepwd_panel,#quick_back_account').show();
+})
+
+$("#quick_back_account").click(function () {
+	$('#changepwd_panel,#quick_back_account').hide();
+	$('#quick_auth_panel').show();
+})
+
+$("body").keydown(function(e) {
+	var event = window.event || e;
+	var code = event.keyCode || event.which || event.charCode
+	if (code == 13) {
+		switch (currentSelectedPanelWithInput) {
+			case 'account':
+				$('#login_button').click();
+				break;
+			case 'wechat':
+				$('#wx_static_login_button').click();
+				break;
+			case 'sms':
+				$('#sms_login_button').click();
+				break;
+			case 'zero':
+				$('#zero_login_button').click();
+				break;
+			case 'meeting':
+				$('#meeting_button').click();
+				break;
+			case 'quick_account':
+				$('#quick_login_button').click();
+				break;
+			case 'quick_sms':
+				$('#quick_sms_login_button').click();
+				break;
+			case 'sms_bind':
+				$('#sms_bind_login_button').click();
+				break;
+			case 'wx_bind':
+				$('#wx_bind_login_button').click();
+				break;
+			default: return null
+		}
+	}
+})
+
+$(".icon").click(function () {
+	var clsname = $(this).attr('class');
+	//自己变蓝，其它变灰
+	$.each($(".icon"), function (k, v) {
+		var tmp = $(this).attr('class');
+		if (clsname == tmp && clsname.indexOf('blue') !== false) {
+			$(this).attr('class', tmp.replace(/gray/i, 'blue'));
+		} else {
+			$(this).attr('class', tmp.replace(/blue/i, 'gray'));
+		}
+	})
+
+	//切换面板
+	switch (clsname) {
+		case 'icon icon-wechat-gray':
+			//微信
+			wechat_panel();
+			currentSelectedPanelWithInput = 'wechat';
+			break;
+		case 'icon icon-sms-gray':
+			//短信
+			sms_panel();
+			currentSelectedPanelWithInput = 'sms';
+			break;
+		case 'icon icon-account-gray':
+			//账号
+			currentSelectedPanelWithInput = 'account';
+			web_panel();
+			break;
+		case 'icon icon-noaccount-gray':
+			//无账号认证
+			noaccount_panel();
+			currentSelectedPanelWithInput = '';
+			break;
+		case 'icon icon-wxwifi-gray':
+			//微信连wifi
+			wxwifi_panel();
+			currentSelectedPanelWithInput = '';
+
+			break;
+		case 'icon icon-localqrcode-gray':
+			//免认证
+			localqrcode_panel();
+			currentSelectedPanelWithInput = '';
+			break;
+		case 'icon icon-lanxin-gray':
+			//蓝信认证
+			lanxin_panel();
+			currentSelectedPanelWithInput = '';
+			break;
+		case 'icon icon-enterpriseWeChat-gray':
+			//企业微信认证
+			enterpriseWeChat_panel();
+			currentSelectedPanelWithInput = '';
+			break;
+		case 'icon icon-dingTalk-gray':
+			//钉钉认证
+			dingTalk_panel();
+			currentSelectedPanelWithInput = '';
+			break;
+		case 'icon icon-kdzl-gray':
+			//口袋助理认证
+			kdzl_panel();
+			currentSelectedPanelWithInput = '';
+			break;
+		case 'icon icon-moa-gray':
+			//无账号认证
+			moa_panel();
+			currentSelectedPanelWithInput = '';
+			break;
+		case 'icon icon-cas-gray':
+			//免认证
+			cas_panel();
+			currentSelectedPanelWithInput = '';
+			break;
+		case 'icon icon-zero-gray':
+			//奇安信ID
+			zero_panel();
+			currentSelectedPanelWithInput = 'zero';
+			break;
+		case 'icon icon-custom-gray':
+			//自定义OAUTH认证
+			custom_panel();
+			currentSelectedPanelWithInput = '';
+			break;
+		case 'icon icon-meeting-gray':
+			//会议二维码认证
+			meeting_panel();
+			currentSelectedPanelWithInput = 'meeting';
+			break;
+	}
+});
+
+function GetQueryString(name) {
+	var reg = new RegExp("(^|&)" + name + "=([^&]*)(&|$)", "i");
+	var r = window.location.search.substr(1).match(reg);
+	var context = "";
+	if (r != null)
+		context = r[2];
+	reg = null;
+	r = null;
+	return context == null || context == "" || context == "undefined" ? "" : decodeURIComponent(context);
+}
+function getAuthParam() {
+	var authparam = Base64.decode(GetQueryString('authparam'));
+	if (authparam) {
+		authparam = JSON.parse(authparam) || {};
+	}
+	return authparam;
+}
+function initAuthType() {
+  hideAll()
+  return
+
+	var authparam = Base64.decode(GetQueryString('authparam'));
+	if (authparam) {
+		authparam = JSON.parse(authparam) || {};
+		var isOneKeyNoAuth = authparam.onekeynoauth;
+		if (isOneKeyNoAuth) {
+			WB2.checkAuth(function (result) {
+				if (result.is_samemac_continue) {
+					wifi_panel(result.onekey_auth_button);
+				} else {
+					showPanel(authparam)
+				}
+			})
+		} else {
+			showPanel(authparam)
+		}
+	} else {
+		$.each($(".icon"), function (k, v) {
+			$(this).css('display', 'inline-block');
+		})
+		$('.icon-account-gray').click()
+	}
+}
+
+var loginTypeMap = {
+	'1': 'account',
+	'2': 'account',
+	'3': 'account',
+	'5': 'account',
+	'7': 'account',
+	'-1': 'sms',
+	'12': 'wxwifi',
+	'-2': 'wechat',
+	'-5': 'localqrcode',
+	'11': 'noaccount',
+	'13': 'kdzl',
+	'14': 'enterpriseWeChat',
+	'15': 'dingTalk',
+	'16': 'moa',
+	'17': 'lanxin',
+	'18': 'custom',
+	'40': 'cas',
+	'-10': 'zero',
+	'-11': 'meeting',
+}
+
+function showPanel(authparam) {
+	var authtype = authparam.authtype.split(',') || [];
+	if (authtype.length <= 1) {
+		$('#login_type').hide()
+	} else {
+		for (var i = authtype.length - 1; i >= 0; i--) {
+			var id = '.icon-' + loginTypeMap[authtype[i]] + '-gray';
+			$(id).css('display', 'inline-block');
+		}
+	}
+	if ($.inArray('1', authtype) !== -1
+		|| $.inArray('2', authtype) !== -1
+		|| $.inArray('3', authtype) !== -1
+		|| $.inArray('5', authtype) !== -1
+		|| $.inArray('7', authtype) !== -1
+	) {
+		$('.icon-account-gray').attr('class', 'icon icon-account-blue');
+		web_panel(true);
+		return
+	}
+	if ($.inArray('-1', authtype) !== -1) {
+		$('.icon-sms-gray').attr('class', 'icon icon-sms-blue');
+		sms_panel(true);
+		return
+	}
+	if ($.inArray('12', authtype) !== -1 && api_cfg.terminal !== 'pc') {
+		$('.icon-wxwifi-gray').attr('class', 'icon icon-wxwifi-blue');
+		wxwifi_panel(true);
+		return
+	}
+	if ($.inArray('-2', authtype) !== -1) {
+		$('.icon-wechat-gray').attr('class', 'icon icon-wechat-blue');
+		wechat_panel();
+		return
+	}
+	if ($.inArray('-5', authtype) !== -1) {
+		$('.icon-localqrcode-gray').attr('class', 'icon icon-localqrcode-blue');
+		localqrcode_panel();
+		return
+	}
+	if ($.inArray('11', authtype) !== -1) {
+		$('.icon-noaccount-gray').attr('class', 'icon icon-noaccount-blue');
+		noaccount_panel();
+		return
+	}
+	if ($.inArray('13', authtype) !== -1) {
+		$('.icon-kdzl-gray').attr('class', 'icon icon-kdzl-blue');
+		kdzl_panel();
+		return
+	}
+	if ($.inArray('14', authtype) !== -1) {
+		$('.icon-enterpriseWeChat-gray').attr('class', 'icon icon-enterpriseWeChat-blue');
+		enterpriseWeChat_panel();
+		return
+	}
+	if ($.inArray('15', authtype) !== -1) {
+		$('.icon-dingTalk-gray').attr('class', 'icon icon-dingTalk-blue');
+		dingTalk_panel();
+		return
+	}
+	if ($.inArray('16', authtype) !== -1) {
+		$('.icon-moa-gray').attr('class', 'icon icon-moa-blue');
+		moa_panel();
+		return
+	}
+	if ($.inArray('17', authtype) !== -1) {
+		$('.icon-lanxin-gray').attr('class', 'icon icon-lanxin-blue');
+		lanxin_panel();
+		return
+	}
+	if ($.inArray('18', authtype) !== -1) {
+		$('.icon-custom-gray').attr('class', 'icon icon-custom-blue');
+		custom_panel();
+		return
+	}
+	if ($.inArray('40', authtype) !== -1) {
+		$('.icon-cas-gray').attr('class', 'icon icon-cas-blue');
+		cas_panel();
+		return
+	}
+	if ($.inArray('-10', authtype) !== -1) {
+		$('.icon-zero-gray').attr('class', 'icon icon-zero-blue');
+		zero_panel();
+		return
+	}
+	if ($.inArray('-11', authtype) !== -1) {
+		$('.icon-meeting-gray').attr('class', 'icon icon-meeting-blue');
+		meeting_panel();
+		return
+	}
+}
+
+//获得Cookie解码后的值
+function GetCookieVal(offset)
+{
+	var endstr = document.cookie.indexOf(";", offset);
+	if (endstr == -1)
+		endstr = document.cookie.length;
+	return unescape(document.cookie.substring(offset, endstr));
+}
+
+//设定Cookie值
+function SetCookie(name, value, expires)
+{
+	var expdate = new Date();
+	var argv = SetCookie.arguments;
+	var argc = SetCookie.arguments.length;
+	if (expires == null || expires == '') {
+		expires = 30 * 24 * 3600;
+	}
+	var path = (argc > 3) ? argv[3] : null;
+	var domain = (argc > 4) ? argv[4] : null;
+	var secure = (argc > 5) ? argv[5] : false;
+	if (expires != null) {
+		expdate.setTime(expdate.getTime() + (expires * 1000));
+	}
+
+	document.cookie = name + "=" + escape(value) + ("; expires=" + expdate.toGMTString())
+		+ ((path == null) ? "" : ("; path=" + path)) + ((domain == null) ? "" : ("; domain=" + domain))
+		+ ((secure == true) ? "; secure" : "");
+}
+
+//删除Cookie
+function DelCookie(name)
+{
+	var exp = new Date();
+	exp.setTime(exp.getTime() - 1);
+	var cval = GetCookie(name);
+	document.cookie = name + "=" + cval + "; expires=" + exp.toGMTString();
+}
+
+//获得Cookie的原始值
+function GetCookie(name)
+{
+	var arg = name + "=";
+	var alen = arg.length;
+	var clen = document.cookie.length;
+	var i = 0;
+	while (i < clen) {
+		var j = i + alen;
+		if (document.cookie.substring(i, j) == arg)
+			return GetCookieVal(j);
+		i = document.cookie.indexOf(" ", i) + 1;
+		if (i == 0)
+			break;
+	}
+	return null;
+}
+
+
+initAuthType();
+$('.ant-checkbox-input').click(function () {
+	var checkbox = $(this).parent();
+	var checked = $(this).prop('checked');
+	$(this).prop('checked', checked);
+	checked ? checkbox.addClass('ant-checkbox-checked') : checkbox.removeClass('ant-checkbox-checked');
+	checkbox.parent().children('span').css('color', '');
+	checkbox.children('.ant-checkbox-inner').css('border-color', '');
+});
+if (__WEBCONFIG.defaultCheckDisclaimer) {
+	$('.disclaimer .ant-checkbox-input').each(function () {
+		$(this).click()
+	});
+}
+$('.ant-input').change(function () {
+	$(this).removeClass('has-error');
+});
+if (GetCookie('remember_account')) {
+	$('#remember_account .ant-checkbox-input').click()
+	var usernameCookie = GetCookie('username');
+	if (usernameCookie) {
+		$('#username').val(usernameCookie)
+	}
+	var passwordCookie = GetCookie('password');
+	if (passwordCookie) {
+		$('#password').val(passwordCookie)
+		$("#account_panel input[name=pwdLabel]").hide();
+		$("#account_panel input[name=pwd]").show();
+	}
+}
+if (GetCookie('quick_remember_account')) {
+	$('#quick_remember_account .ant-checkbox-input').click()
+	var usernameCookie = GetCookie('quick_username');
+	if (usernameCookie) {
+		$('#quick_username').val(usernameCookie)
+	}
+	var passwordCookie = GetCookie('quick_password');
+	if (passwordCookie) {
+		$('#quick_password').val(passwordCookie)
+		$("#quick_auth_tab1_body input[name=pwdLabel]").hide();
+		$("#quick_auth_tab1_body input[name=pwd]").show();
+	}
+}
+var zeroAccountCookie = GetCookie('remember_zero_account')
+if (zeroAccountCookie) {
+	if (!!zeroAccountCookie != $('#remember_zero_account .ant-checkbox-input').is(':checked')) {
+		$('#remember_zero_account .ant-checkbox-input').click()
+	}
+	var zeroUsernameCookie = GetCookie('zero_username');
+	$('#zero_username').val(zeroUsernameCookie || '')
+	var zeroPasswordCookie = GetCookie('zero_password');
+	if (zeroPasswordCookie) {
+		$('#zero_password').val(zeroPasswordCookie)
+		$("#zero_panel input[name=pwdLabel]").hide();
+		$("#zero_panel input[name=pwd]").show();
+	} else {
+		$("#zero_panel input[name=pwdLabel]").show();
+		$("#zero_panel input[name=pwd]").hide();
+	}
+}
+
+function setSmsCodeCookie(id) {
+	if ($('#' + id)) {
+		if (GetCookie(id + '_check')) {
+			setSmsCodeCookieVal(id)
+			if (timeTicket[id]) {
+				clearInterval(timeTicket[id])
+			}
+			timeTicket[id] = setInterval(function () {
+				setSmsCodeCookieVal(id)
+			}, 1000)
+		} else if (timeTicket[id]) {
+			clearInterval(timeTicket[id])
+		}
+	}
+}
+
+function setSmsCodeCookieVal(id) {
+	var cookie = GetCookie(id)
+	if (cookie && cookie > 0) {
+		$('#' + id).prop('disabled', true)
+		$('#' + id + ' span').html(cookie + (api_cfg.language !== 'en' ? '秒' : 's'))
+		SetCookie(id, cookie - 1, cookie)
+	} else {
+		$('#' + id).prop("disabled", false)
+		$('#' + id + ' span').html(api_cfg.language !== 'en' ? '获取验证码' : 'Get captcha')
+		if (timeTicket[id]) {
+			clearInterval(timeTicket[id])
+		}
+		DelCookie(id)
+		DelCookie(id + '_check')
+	}
+}
+
+function page_redirect(page) {
+	var href_url = window.location.href; var pos = href_url.indexOf("?")
+	var param = '';
+	if (pos > 0) {
+		param = '?' + href_url.substring(pos + 1);
+	}
+	param = param.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+	window.location.href = page + param;
+}
+
+function md6(str) {
+  var mc = function (a) {
+    ret = "";
+    var b = "0123456789ABCDEF";
+    if (a == ' '.charCodeAt()) {
+      ret = "+"
+    } else if ((a < '0'.charCodeAt() && a != '-'.charCodeAt() && a != '.'.charCodeAt()) || (a < 'A'.charCodeAt() && a > '9'.charCodeAt()) || (a > 'Z'.charCodeAt() && a < 'a'.charCodeAt() && a != '_'.charCodeAt()) || (a > 'z'.charCodeAt())) {
+      ret = "%";
+      ret += b.charAt(a >> 4);
+      ret += b.charAt(a & 15)
+    } else {
+      ret = String.fromCharCode(a)
+    };
+    return ret
+  };
+
+  var m = function (a) {
+    return (((a & 1) << 7) | ((a & (0x2)) << 5) | ((a & (0x4)) << 3) | ((a & (0x8)) << 1) | ((a & (0x10)) >> 1) | ((a & (0x20)) >> 3) | ((a & (0x40)) >> 5) | ((a & (0x80)) >> 7))
+  };
+
+  var md6 = function (a) {
+    var b = "";
+    var c = 0xbb;
+    for (i = 0; i < a.length; i++) {
+      c = m(a.charCodeAt(i)) ^ (0x35 ^ (i & 0xff));
+      var d = c.toString(16);
+      b += mc(c)
+    };
+    return b
+  };
+  return md6(str);
+}
+
+function isForceChangePwd() {
+  var logged = false;
+  var searchStrings = window.location.search.slice(1).split('&');
+  for (let i = 0; i < searchStrings.length; i++) {
+    var peer = searchStrings[i].split('=');
+    var key = peer[0];
+    var value = peer[1];
+    if (key === "action" && value === "changepassword") {
+      logged = true;
+    }
+  }
+  return logged;
+}

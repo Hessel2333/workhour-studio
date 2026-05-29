@@ -1,0 +1,59 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 开发指导规则
+
+## 代码规范
+
+### React组件规范
+- 使用函数式组件和Hooks
+- 组件文件使用PascalCase命名
+- 优先使用TypeScript接口定义类型
+- 状态管理使用useState，复杂状态考虑useReducer
+
+### 样式规范
+- 优先使用TailwindCSS类
+- 响应式设计遵循mobile-first原则
+- 使用Radix UI组件作为基础，在[components/ui/](mdc:components/ui)中定制
+- 颜色方案支持渐变效果，保持现代化视觉
+
+### 文件组织
+- UI组件放在 `components/ui/` 目录
+- 页面组件放在 `app/` 目录（Next.js App Router）
+- 类型定义在组件文件内部或独立的types文件
+- 工具函数考虑提取到 `lib/` 目录
+
+## 功能开发规范
+
+### 状态管理
+- 本地状态使用useState
+- 表单状态集中管理
+- 异步操作使用适当的loading状态
+- Toast消息统一处理
+
+### Excel处理
+- 使用XLSX库处理Excel文件生成
+- 数据格式遵循`ExcelRow`接口
+- 时间格式统一为HH:mm格式
+- 支持中文文件名下载
+
+### 配置管理
+- 配置数据使用JSON格式
+- 支持导入导出功能
+- 配置验证和错误处理
+- 向后兼容性考虑
+
+## 错误处理
+- 用户操作错误通过Toast提示
+- 文件处理错误要有明确提示
+- 表单验证要有实时反馈
+- 异常情况要有兜底处理
+
+## 性能优化
+- 大型状态更新考虑优化
+- 文件处理使用异步操作
+- 适当使用React.memo防止不必要渲染
+- 图标和样式资源按需加载
+

@@ -1,0 +1,126 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+# 业务逻辑规则
+
+## 工时表生成逻辑
+
+### 时间分配算法
+工时表生成基于以下规则（在[app/page.tsx](mdc:app/page.tsx)的`generateExcel`函数中实现）：
+
+1. **工作时段划分**：
+   - 上午：8:00-11:30（7个30分钟时段）
+   - 午休：11:30-13:00（自动跳过）
+   - 下午：13:00-17:00（8个30分钟时段）
+
+2. **工作分配模式**：
+   ```typescript
+   // 上午分配模式（7个时段）
+   const morningPatterns = [
+     [2, 2, 3],     // 2+2+3 = 7个时段
+     [3, 4],        // 3+4 = 7个时段
+     [2, 5],        // 2+5 = 7个时段
+     [7]            // 全部一样 = 7个时段
+   ];
+   
+   // 下午分配模式（8个时段）
+   const afternoonPatterns = [
+     [2, 2, 2, 2],  // 2+2+2+2 = 8个时段  
+     [2, 2, 4],     // 2+2+4 = 8个时段
+     [4, 4],        // 4+4 = 8个时段
+     [3, 5],        // 3+5 = 8个时段
+     [2, 6],        // 2+6 = 8个时段
+     [8]            // 全部一样 = 8个时段
+   ];
+   ```
+
+### 工作内容选择
+
+#### 随机工作项选择
+使用权重算法从`RandomWorkItem[]`中选择：
+```typescript
+const selectRandomItem = (workItems: RandomWorkItem[]) => {
+  const totalWeight = workItems.reduce((sum, item) => sum + item.weight, 0);
+  let random = Math.random() * totalWeight;
+  // 根据权重选择项目
+}
+```
+
+#### 固定时段优先级
+固定安排具有最高优先级，会覆盖随机分配：
+```typescript
+const fixedItem = fixedWorkItems.find(item => {
+  const schedule = item.schedule;
+  if (schedule.weekday === weekday) {
+    const timeValue = hour + minute / 60;
+    const startValue = schedule.startHour + schedule.startMinute / 60;
+    const endValue = schedule.endHour + schedule.endMinute / 60;
+    return timeValue >= startValue && timeValue < endValue;
+  }
+  return false;
+});
+```
+
+## 周末讲堂处理
+
+### 周六处理逻辑
+1. 检查日期是否为周六（`weekday === 6`）
+2. 检查该日期是否启用讲堂（`hasWeekendLecture`函数）
+3. 在指定时间范围内使用讲堂模板
+
+### 时间范围判断
+```typescript
+const currentTimeMinutes = hour * 60 + minute;
+const lectureStartMinutes = weekendLectureTemplate.startHour * 60 + weekendLectureTemplate.startMinute;
+const lectureEndMinutes = weekendLectureTemplate.endHour * 60 + weekendLectureTemplate.endMinute;
+const isWeekendLecture = weekday === 6 && hasWeekendLecture(day, weekday) && 
+  currentTimeMinutes >= lectureStartMinutes && currentTimeMinutes < lectureEndMinutes;
+```
+
+## 配置管理
+
+### 数据结构映射
+配置导入导出时的字段映射：
+```typescript
+// 导出时的中文字段映射
+{
+  随机时段工作内容: randomWorkItems.map(item => ({
+    工作性质: item.workNature,
+    工作类别: item.workType,
+    // ...其他字段
+  }))
+}
+```
+
+### 配置验证
+- 导入时检查JSON格式有效性
+- 必填字段验证（工作性质、工作类别、工作形式）
+- 时间格式验证（小时：8-17，分钟：0或30）
+
+## 日历视图逻辑
+
+### 颜色编码规则
+```typescript
+const getDayColor = (day: number, weekday: number, isCurrentMonth = true, isHovered = false) => {
+  // 周六且有周末讲堂 -> 蓝色
+  if (weekday === 6 && isCurrentMonth && hasWeekendLecture(day, weekday)) {
+    return "bg-gradient-to-br from-blue-400 to-blue-500";
+  }
+  // 其他周末 -> 红色  
+  else if (weekday === 6 || weekday === 7) {
+    return "bg-gradient-to-br from-red-400 to-red-500";
+  }
+  // 工作日 -> 绿色
+  else {
+    return "bg-gradient-to-br from-green-400 to-green-500";
+  }
+}
+```
+
+### 月份切换逻辑
+- 自动处理年份跨越（12月→1月，1月→12月）
+- 自动计算每月天数和起始星期
+- 填充上月和下月日期以完整显示周视图
+

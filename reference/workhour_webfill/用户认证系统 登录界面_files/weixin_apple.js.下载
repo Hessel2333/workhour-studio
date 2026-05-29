@@ -1,0 +1,29 @@
+//for 微信认证是portal弹窗
+(
+	function() {
+		function run() {
+			var iframe = document.createElement('iframe');
+			iframe.id = 'testforweixin';
+			iframe.name = 'testforweixin';
+			iframe.width = 0;
+			iframe.height = 0;
+			iframe.frameBorder = 0;
+			iframe.style.display = "none";
+			
+			var href_url = window.location.href;
+            var pos = href_url.indexOf("/p")
+
+			var _url = href_url.substring(0, pos);
+			var url =  _url + "/weixin/register.php";
+                        url = url.replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;").replace(/'/g, "&#039;");
+			iframe.src = url;
+			document.body.appendChild(iframe);
+		}
+
+		window.weinxinplugin = {
+			run: run
+		}
+
+		weinxinplugin.run();
+	}
+)();

@@ -1,0 +1,39 @@
+var __WEBCONFIG = {
+    "zh":{
+        "pcTitle":"\u7528\u6237\u8ba4\u8bc1\u7cfb\u7edf",
+        "pcLogo":{
+            "name":"pc_logo.png",
+            "url":"./images/zh/pc_logo.png"
+        },
+        "pcBackground":{
+            "name":"pc_background.png",
+            "url":"./images/zh/pc_background.png"
+        },
+        "pcFooterTipColor":"#000000",
+        "pcFooterTip":"",
+        "pcTipSwitch":true,
+        "tipType":"text",
+        "tipText":"\u5efa\u8bae\u516c\u53f8\u6839\u636e\u6cd5\u5f8b\u6cd5\u89c4\u53ca\u81ea\u8eab\u7ba1\u7406\u5b89\u6392\uff0c\u843d\u5b9e\u4e0e\u7ec8\u7aef\u7528\u6237\u5173\u4e8e\u4e2a\u4eba\u4fe1\u606f\u5904\u7406\u7684\u544a\u77e5\u4e49\u52a1\u53ca\u5176\u5b83\u6ce8\u610f\u4e8b\u9879\u3002",
+        "mobileFooterTipColor":"#FFFFFF",
+        "mobileFooterTip":"",
+        "mobileLogo":{
+            "name":"mobile_logo.png",
+            "url":"./images/zh/mobile_logo.png"
+        },
+        "mobileBackground":{
+            "name":"mobile_background.png",
+            "url":"./images/zh/mobile_background.png"
+        },
+        "disclaimer":""
+    },
+    "en":{
+        "enablePc":false,
+        "enableMobile":false,
+        "disclaimer":""
+    },
+    "changePasswordSwitch":true,
+    "enableDisclaimer":false,
+    "passwordRules":[
+        
+    ]
+}
