@@ -18,7 +18,7 @@ jobs:
       matrix:
         include:
           - name: Windows x64
-            platform: windows-latest
+            platform: windows-2025
             args: --bundles nsis
             signing_identity: ""
           - name: macOS Apple Silicon
@@ -32,10 +32,10 @@ jobs:
 
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: Set up Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v6
         with:
           node-version: 22
           cache: npm
@@ -57,10 +57,12 @@ jobs:
         run: npm run check
 
       - name: Build and publish release
-        uses: tauri-apps/tauri-action@v0
+        uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           APPLE_SIGNING_IDENTITY: ${{ matrix.signing_identity }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
         with:
           tagName: app-v__VERSION__
           releaseName: Workhour Studio v__VERSION__
@@ -74,4 +76,5 @@ jobs:
             首次启动会自动创建本地数据库，也可以从旧 Excel 文件导入数据。
           releaseDraft: true
           prerelease: false
+          updaterJsonPreferNsis: true
           args: ${{ matrix.args }}

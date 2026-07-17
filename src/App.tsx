@@ -6,7 +6,6 @@ import {
   ChevronLeft,
   ChevronRight,
   Clock3,
-  Database,
   Download,
   FileDown,
   FileUp,
@@ -25,9 +24,9 @@ import {
   Wand2,
   X,
 } from "lucide-react";
-import { type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
+import { lazy, Suspense, type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { BreakdownPieChart, CategoryChart, TemplateWeightChart, TrendBarChart } from "./components/Chart";
+import { TemplateWeightChart } from "./components/Chart";
 import { Badge } from "./components/ui/Badge";
 import { Button } from "./components/ui/Button";
 import { Card, CardHeader } from "./components/ui/Card";
@@ -38,12 +37,32 @@ import { PageHeader } from "./components/ui/PageHeader";
 import { createId } from "./data/defaults";
 import type { MonthlyTemplateSetting, PageKey, Project, TemplatePreset, ThemeMode, TimesheetEntry, WorkTemplate, WorkspaceState } from "./data/types";
 import { generateAutofillEntries } from "./features/autofill";
-import { exportMonthExcel, importConfigJson, importExcelWorkbook, mergeContinuousEntries } from "./features/excel";
-import { exportTemplatePresetJson, exportWorkspaceJson, importTemplatePresetJson, importWorkspaceBackupJson } from "./features/workspaceBackup";
+import { mergeContinuousEntries } from "./features/excel";
+import { getEntryProjectColor, getNatureColor, projectColorPalette, stableIndex } from "./features/schedule/presentation";
+import {
+  applyMonthSettings,
+  applyPresetToMonth,
+  clampTemplateWeight,
+  createMonthlyTemplateSetting,
+  createTemplatePreset,
+  getAutofillTemplates,
+  getMonthTemplateSettings,
+  isCommonTemplate,
+  isTemplateAllowed,
+  normalizeRemarkOptions,
+  projectExists,
+  requiresLinkedProject,
+  templateSignature,
+} from "./features/templates/templateState";
+import { exportTemplatePresetJson, importTemplatePresetJson } from "./features/workspaceBackup";
 import { loadWorkspace, saveStatePatch } from "./lib/db";
 import { cn } from "./lib/utils";
+import { AnalyticsPage } from "./pages/AnalyticsPage";
+import { DashboardPage } from "./pages/DashboardPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import {
   dateForMonthDay,
+  dateDistance,
   daysInMonth,
   durationHours,
   fromMinutes,
@@ -56,6 +75,10 @@ import {
   toIsoDate,
   toMinutes,
 } from "./lib/time";
+
+const ImportExportPage = lazy(() =>
+  import("./pages/ImportExportPage").then((module) => ({ default: module.ImportExportPage })),
+);
 
 const pages: Array<{ key: PageKey; label: string; icon: typeof LayoutDashboard }> = [
   { key: "dashboard", label: "仪表盘", icon: LayoutDashboard },
@@ -83,14 +106,12 @@ const workFormOptionsByNature: Record<string, string[]> = {
 };
 const workCategoryOptions = [...new Set(Object.values(workCategoryOptionsByNature).flat())];
 const workFormOptions = [...new Set(Object.values(workFormOptionsByNature).flat())];
-const projectRequiredCategories = new Set(["总部项目", "公司项目", "院控项目", "创新创效", "探索项目", "其他科研生产"]);
 const projectCategoryOptions = ["总部项目", "公司项目", "院控项目", "探索项目"];
 const validProjectCategories = new Set(projectCategoryOptions);
 const projectOwnerOptions: Array<{ value: NonNullable<Project["ownerScope"]>; label: string }> = [
   { value: "self", label: "本人负责" },
   { value: "other", label: "他人负责" },
 ];
-const projectColorPalette = ["#007aff", "#ff9500", "#af52de", "#5856d6", "#ff2d55", "#64d2ff", "#8e8e93", "#bf5af2"];
 const weekTimelineStart = 7 * 60;
 const weekTimelineEnd = 20 * 60;
 const weekSlotHeight = 30;
@@ -132,8 +153,6 @@ type ScheduleDateSelectionIntent = {
 const getWorkCategoryOptions = (workNature: string) => workCategoryOptionsByNature[workNature] || workCategoryOptions;
 const getWorkFormOptions = (workNature: string) => workFormOptionsByNature[workNature] || workFormOptions;
 const withCurrentOption = (options: string[], current?: string) => current && !options.includes(current) ? [current, ...options] : options;
-const clampTemplateWeight = (weight: number) => Math.min(20, Math.max(1, Math.round(Number.isFinite(weight) ? weight : 10)));
-const requiresLinkedProject = (workCategory: string) => projectRequiredCategories.has(workCategory);
 const legacyTransactionalNature = "\u975e\u79d1\u7814\u5de5\u4f5c";
 const normalizeWorkNatureValue = (value: string) => value === legacyTransactionalNature ? "事务性工作" : value || "事务性工作";
 const formatNatureForm = (workNature: string, workForm?: string) => workForm ? `${workNature} · ${workForm}` : workNature;
@@ -170,116 +189,6 @@ function normalizeWorkSelection<T extends WorkSelection>(draft: T, patch: Partia
     next.projectName = "";
   }
   return next;
-}
-
-function projectExists(projects: Project[], projectName?: string) {
-  if (!projectName || projectName === "备注") return true;
-  return projects.some((project) => project.name === projectName);
-}
-
-function isTemplateAllowed(template: Pick<WorkTemplate, "workCategory" | "projectName">, projects: Project[]) {
-  if (!requiresLinkedProject(template.workCategory)) return true;
-  return Boolean(template.projectName && template.projectName !== "备注" && projectExists(projects, template.projectName));
-}
-
-const isCommonTemplate = (template: Pick<WorkTemplate, "enabled" | "archived">) => template.enabled && !template.archived;
-
-const normalizeRemarkOptions = (template: Pick<WorkTemplate, "remark" | "remarkOptions">) =>
-  [...new Set([...(template.remarkOptions || []), template.remark || ""].map((item) => item.trim()).filter(Boolean))].slice(0, 12);
-
-const templateSignature = (template: Pick<WorkTemplate, "workNature" | "workCategory" | "projectName" | "workForm" | "scheduleKind">) =>
-  [template.workNature, template.workCategory, template.projectName || "", template.workForm, template.scheduleKind].join("\u0001");
-
-function createMonthlyTemplateSetting(month: string, template: WorkTemplate, patch: Partial<MonthlyTemplateSetting> = {}): MonthlyTemplateSetting {
-  return {
-    id: patch.id || createId("monthly_template"),
-    month,
-    templateId: template.id,
-    enabled: patch.enabled ?? isCommonTemplate(template),
-    weight: clampTemplateWeight(patch.weight ?? template.weight),
-    createdAt: patch.createdAt || now(),
-    updatedAt: patch.updatedAt || now(),
-  };
-}
-
-function getMonthTemplateSettings(state: WorkspaceState, month: string) {
-  const templateIds = new Set(state.templates.map((template) => template.id));
-  const completeSettings = (settings: MonthlyTemplateSetting[]) => {
-    const configuredTemplateIds = new Set(settings.map((setting) => setting.templateId));
-    return [
-      ...settings,
-      ...state.templates
-        .filter((template) => !configuredTemplateIds.has(template.id))
-        .map((template) => createMonthlyTemplateSetting(month, template)),
-    ];
-  };
-  const settings = (state.monthlyTemplateSettings || []).filter((setting) => setting.month === month && templateIds.has(setting.templateId));
-  if (settings.length) return completeSettings(settings);
-  const previousMonth = [...new Set((state.monthlyTemplateSettings || [])
-    .filter((setting) => setting.month < month && templateIds.has(setting.templateId))
-    .map((setting) => setting.month))]
-    .sort()
-    .at(-1);
-  if (previousMonth) {
-    return completeSettings((state.monthlyTemplateSettings || [])
-      .filter((setting) => setting.month === previousMonth && templateIds.has(setting.templateId))
-      .map((setting) => ({
-        ...setting,
-        id: createId("monthly_template"),
-        month,
-        createdAt: now(),
-        updatedAt: now(),
-      })));
-  }
-  return completeSettings([]);
-}
-
-function applyMonthSettings(templates: WorkTemplate[], settings: MonthlyTemplateSetting[]) {
-  const settingsByTemplate = new Map(settings.map((setting) => [setting.templateId, setting]));
-  return templates.map((template) => {
-    const setting = settingsByTemplate.get(template.id);
-    return setting ? { ...template, enabled: setting.enabled, weight: clampTemplateWeight(setting.weight) } : template;
-  });
-}
-
-function createTemplatePreset(name: string, settings: MonthlyTemplateSetting[]): TemplatePreset {
-  return {
-    id: createId("template_preset"),
-    name: name.trim() || "未命名方案",
-    settings: settings.map((setting) => ({
-      templateId: setting.templateId,
-      enabled: setting.enabled,
-      weight: clampTemplateWeight(setting.weight),
-    })),
-    createdAt: now(),
-    updatedAt: now(),
-  };
-}
-
-function applyPresetToMonth(month: string, templates: WorkTemplate[], preset: TemplatePreset, existing: MonthlyTemplateSetting[]) {
-  const presetByTemplate = new Map(preset.settings.map((setting) => [setting.templateId, setting]));
-  return templates.map((template) => {
-    const presetSetting = presetByTemplate.get(template.id);
-    const current = existing.find((setting) => setting.templateId === template.id);
-    return createMonthlyTemplateSetting(month, template, {
-      ...current,
-      enabled: presetSetting?.enabled ?? false,
-      weight: presetSetting?.weight ?? current?.weight ?? template.weight,
-      id: current?.id,
-      month,
-      templateId: template.id,
-      createdAt: current?.createdAt,
-      updatedAt: now(),
-    });
-  });
-}
-
-function getAutofillTemplates(state: WorkspaceState, month: string) {
-  const templates = applyMonthSettings(state.templates, getMonthTemplateSettings(state, month));
-  return templates
-    .filter(isCommonTemplate)
-    .filter((template) => isTemplateAllowed(template, state.projects))
-    .map((template) => projectExists(state.projects, template.projectName) ? template : { ...template, projectName: "备注", projectId: undefined });
 }
 
 function sanitizeWorkspaceData(workspace: WorkspaceState) {
@@ -826,14 +735,18 @@ function App() {
 
         <div className="main-stage">
           <MobileNav active={page} onChange={setPage} />
-          {page === "dashboard" && <Dashboard {...pageProps} />}
+          {page === "dashboard" && <DashboardPage state={state} month={month} save={save} />}
           {page === "schedule" && <SchedulePage {...pageProps} />}
           {page === "projects" && <ProjectsPage {...pageProps} />}
           {page === "templates" && <TemplatesPage {...pageProps} />}
           {page === "timesheet" && <TimesheetPage {...pageProps} />}
           {page === "analytics" && <AnalyticsPage {...pageProps} />}
           {page === "guide" && <GuideDocs />}
-          {page === "importExport" && <ImportExportPage {...pageProps} />}
+          {page === "importExport" && (
+            <Suspense fallback={<div className="p-6 text-sm text-muted">正在加载导入导出…</div>}>
+              <ImportExportPage state={state} month={month} save={save} setNotice={setNotice} />
+            </Suspense>
+          )}
           {page === "settings" && <SettingsPage {...pageProps} />}
         </div>
       </main>
@@ -964,76 +877,10 @@ function ScheduleTitleToolbar({
   );
 }
 
-type AnalyticsGranularity = "week" | "month" | "quarter" | "year";
-
 function shiftMonth(date: string, diffMonths: number) {
   const next = new Date(`${date}T00:00:00`);
   next.setMonth(next.getMonth() + diffMonths);
   return toIsoDate(next);
-}
-
-function shiftYear(date: string, diffYears: number) {
-  const next = new Date(`${date}T00:00:00`);
-  next.setFullYear(next.getFullYear() + diffYears);
-  return toIsoDate(next);
-}
-
-function analyticsPeriod(date: string, granularity: AnalyticsGranularity) {
-  const current = new Date(`${date}T00:00:00`);
-  const year = current.getFullYear();
-  const month = current.getMonth();
-  if (granularity === "week") {
-    const dates = getWeekDates(date);
-    return { start: dates[0], end: dates[6], label: `${dates[0].slice(5).replace("-", "/")} - ${dates[6].slice(5).replace("-", "/")}` };
-  }
-  if (granularity === "month") {
-    const key = monthKey(current);
-    return { start: `${key}-01`, end: dateForMonthDay(key, daysInMonth(key)), label: `${year}年${month + 1}月` };
-  }
-  if (granularity === "quarter") {
-    const quarter = Math.floor(month / 3);
-    const startMonth = quarter * 3;
-    const startKey = `${year}-${String(startMonth + 1).padStart(2, "0")}`;
-    const endKey = `${year}-${String(startMonth + 3).padStart(2, "0")}`;
-    return { start: `${startKey}-01`, end: dateForMonthDay(endKey, daysInMonth(endKey)), label: `${year}年第 ${quarter + 1} 季度` };
-  }
-  return { start: `${year}-01-01`, end: `${year}-12-31`, label: `${year}年` };
-}
-
-function shiftAnalyticsAnchor(date: string, granularity: AnalyticsGranularity, direction: -1 | 1) {
-  if (granularity === "week") return shiftDate(date, direction * 7);
-  if (granularity === "month") return shiftMonth(date, direction);
-  if (granularity === "quarter") return shiftMonth(date, direction * 3);
-  return shiftYear(date, direction);
-}
-
-function AnalyticsTitleToolbar({
-  granularity,
-  anchorDate,
-  onGranularityChange,
-  onAnchorDateChange,
-}: {
-  granularity: AnalyticsGranularity;
-  anchorDate: string;
-  onGranularityChange: (granularity: AnalyticsGranularity) => void;
-  onAnchorDateChange: (date: string) => void;
-}) {
-  const period = analyticsPeriod(anchorDate, granularity);
-  return (
-    <div className="title-schedule-toolbar analytics-title-toolbar">
-      <div className="toolbar-date-nav analytics-period-nav">
-        <button className="toolbar-icon-button" onClick={() => onAnchorDateChange(shiftAnalyticsAnchor(anchorDate, granularity, -1))} aria-label="上一段"><ChevronLeft className="size-4" /></button>
-        <div className="toolbar-period-label">{period.label}</div>
-        <button className="toolbar-icon-button" onClick={() => onAnchorDateChange(shiftAnalyticsAnchor(anchorDate, granularity, 1))} aria-label="下一段"><ChevronRight className="size-4" /></button>
-      </div>
-      <div className="toolbar-segmented analytics-granularity">
-        <button className={cn(granularity === "week" && "active")} onClick={() => onGranularityChange("week")}>周</button>
-        <button className={cn(granularity === "month" && "active")} onClick={() => onGranularityChange("month")}>月</button>
-        <button className={cn(granularity === "quarter" && "active")} onClick={() => onGranularityChange("quarter")}>季度</button>
-        <button className={cn(granularity === "year" && "active")} onClick={() => onGranularityChange("year")}>年</button>
-      </div>
-    </div>
-  );
 }
 
 function TemplateMonthNav({ month, onChange }: { month: string; onChange: (month: string) => void }) {
@@ -1080,89 +927,6 @@ type PageProps = {
   confirmAction: (request: ConfirmRequest) => void;
 };
 
-function Dashboard({ state, month, save }: PageProps) {
-  const monthEntries = state.entries.filter((entry) => entry.workDate.startsWith(month));
-  const hours = monthEntries.reduce((sum, entry) => sum + durationHours(entry.startTime, entry.endTime), 0);
-  const workDays = Array.from({ length: daysInMonth(month) }, (_, index) => dateForMonthDay(month, index + 1)).filter((date) => getWeekday(date) <= 5).length;
-  const target = workDays * (durationHours(state.profile.defaultStart, state.profile.lunchStart) + durationHours(state.profile.lunchEnd, state.profile.defaultEnd));
-  const today = new Date().toISOString().slice(0, 10);
-  const todayEntries = state.entries.filter((entry) => entry.workDate === today).sort((a, b) => a.startTime.localeCompare(b.startTime));
-
-  const createAutofillEntries = async () => {
-    const generated = generateAutofillEntries(month, state.profile, getAutofillTemplates(state, month), state.entries, Date.now() % 1_000_000);
-    await save({ entries: [...state.entries, ...generated] }, `已补全 ${generated.length} 条记录`);
-  };
-
-  return (
-    <>
-      <PageHeader
-        title="仪表盘"
-        description="查看本月完成度、今日记录和最近工时。"
-        action={
-          <div className="flex flex-wrap gap-2">
-            <Button onClick={createAutofillEntries}><Wand2 className="size-4" />自动补全</Button>
-          </div>
-        }
-      />
-      <div className="grid gap-4 lg:grid-cols-4">
-        <StatCard label="本月工时" value={`${hours.toFixed(1)}h`} hint={`目标 ${target.toFixed(1)}h`} />
-        <StatCard label="完成度" value={`${target ? Math.min(100, Math.round((hours / target) * 100)) : 0}%`} hint="按工作日规则估算" />
-        <StatCard label="本月记录" value={String(monthEntries.length)} hint="补全后可在日程中直接调整" />
-        <StatCard label="项目库" value={String(state.projects.length)} hint={`${state.projects.filter((project) => project.isFavorite).length} 个常用项目`} />
-      </div>
-      <div className="dashboard-main-grid mt-5">
-        <Card>
-          <CardHeader title="今日时间轴" />
-          <div className="space-y-3 p-5">
-            {todayEntries.length ? todayEntries.map((entry) => <TimelineRow key={entry.id} entry={entry} />) : <EmptyState icon={<Clock3 className="size-5" />} title="今天还没有记录" text="可以从日程页维护时间块，或在工时表中直接新增记录。" />}
-          </div>
-        </Card>
-        <Card>
-          <CardHeader title="本月最近记录" action={<Badge tone="blue">{monthEntries.length}</Badge>} />
-          <div className="max-h-96 space-y-3 overflow-auto p-5 scrollbar-soft">
-            {monthEntries.slice(-8).reverse().map((entry) => <TimelineRow key={entry.id} entry={entry} compact />)}
-            {monthEntries.length === 0 ? <EmptyState icon={<Wand2 className="size-5" />} title="暂无记录" text="点击自动补全后，可以在日程页直接调整。" /> : null}
-          </div>
-        </Card>
-      </div>
-      <div className="dashboard-main-grid mt-5">
-        <Card><CardHeader title="类别分布" /><div className="p-4"><CategoryChart entries={monthEntries} /></div></Card>
-        <Card><CardHeader title="最近记录" /><RecentEntries entries={state.entries.slice(0, 8)} /></Card>
-      </div>
-    </>
-  );
-}
-
-function StatCard({ label, value, hint }: { label: string; value: string; hint: string }) {
-  return (
-    <Card className="relative overflow-hidden p-5">
-      <div className="absolute right-4 top-4 size-10 rounded-full bg-accent/10" />
-      <div className="text-sm text-muted">{label}</div>
-      <div className="mt-2 text-3xl font-bold tracking-[-0.04em] text-ink">{value}</div>
-      <div className="mt-2 text-xs text-muted">{hint}</div>
-    </Card>
-  );
-}
-
-function TimelineRow({ entry, compact = false }: { entry: TimesheetEntry; compact?: boolean }) {
-  const color = getEntryProjectColor(entry);
-  const hours = durationHours(entry.startTime, entry.endTime).toFixed(1);
-  return (
-    <div
-      className={cn("dashboard-time-block", compact && "compact")}
-      style={{ ["--block-color" as string]: color, ["--nature-color" as string]: getNatureColor(entry.workNature) }}
-    >
-      <strong>{entry.projectName && entry.projectName !== "备注" ? entry.projectName : entry.remark || entry.workCategory}</strong>
-      <div className="dashboard-time-meta">
-        <span className="dashboard-type-dot" />
-        <span>{formatNatureForm(entry.workNature, entry.workForm)}</span>
-      </div>
-      {!compact ? <span className="dashboard-time-range">{entry.startTime} - {entry.endTime}</span> : null}
-      <span className="dashboard-duration">{hours}</span>
-    </div>
-  );
-}
-
 function ProjectSelect({
   value,
   projects,
@@ -1190,45 +954,6 @@ function ProjectSelect({
     </Select>
   );
 }
-
-function RecentEntries({ entries }: { entries: TimesheetEntry[] }) {
-  if (!entries.length) return <div className="p-5"><EmptyState icon={<Database className="size-5" />} title="暂无记录" text="导入 Excel 或新增工时后会显示在这里。" /></div>;
-  return (
-    <div className="overflow-auto scrollbar-soft">
-      <table className="table-glass w-full min-w-[620px] text-left text-sm">
-        <thead className="border-b border-line/10 text-xs text-muted"><tr><th className="px-5 py-3 font-medium">日期</th><th className="px-5 py-3 font-medium">时间</th><th className="px-5 py-3 font-medium">类别</th><th className="px-5 py-3 font-medium">内容</th></tr></thead>
-        <tbody>
-          {entries.map((entry) => (
-            <tr key={entry.id} className="border-b border-line/10">
-              <td className="px-5 py-3">{entry.workDate}</td>
-              <td className="px-5 py-3 text-muted">{entry.startTime}-{entry.endTime}</td>
-              <td className="px-5 py-3">{entry.workCategory}</td>
-              <td className="px-5 py-3 text-muted">{entry.remark || entry.projectName || "未填写备注"}</td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
-  );
-}
-
-const stableIndex = (value: string, modulo: number) => {
-  let hash = 0;
-  for (let index = 0; index < value.length; index += 1) hash = (hash * 31 + value.charCodeAt(index)) >>> 0;
-  return hash % modulo;
-};
-
-const getEntryProjectColor = (entry: TimesheetEntry) => {
-  const key = entry.projectName && entry.projectName !== "备注" ? entry.projectName : entry.workCategory;
-  return projectColorPalette[stableIndex(key || "default", projectColorPalette.length)];
-};
-
-const getNatureColor = (workNature: string) => {
-  if (workNature.includes("请假")) return "#8e8e93";
-  if (workNature.includes("事务")) return "#ff9500";
-  if (workNature.includes("科研")) return "#007aff";
-  return "#5856d6";
-};
 
 const formatDayHeader = (date: string) => {
   const [, , day] = date.split("-");
@@ -3157,205 +2882,6 @@ function TimesheetPage({ state, month, save, confirmAction }: PageProps) {
           }}
         />
       ) : null}
-    </>
-  );
-}
-
-function AnalyticsPage({ state }: PageProps) {
-  const today = toIsoDate(new Date());
-  const [granularity, setGranularity] = useState<AnalyticsGranularity>("month");
-  const [anchorDate, setAnchorDate] = useState(today);
-  const period = analyticsPeriod(anchorDate, granularity);
-  const start = period.start;
-  const end = period.end;
-  const entries = state.entries
-    .filter((entry) => entry.status === "confirmed" && entry.workDate >= start && entry.workDate <= end)
-    .sort((a, b) => `${a.workDate} ${a.startTime}`.localeCompare(`${b.workDate} ${b.startTime}`));
-  const totalHours = entries.reduce((sum, entry) => sum + durationHours(entry.startTime, entry.endTime), 0);
-  const activeDays = new Set(entries.map((entry) => entry.workDate)).size;
-  const projectCount = new Set(entries.map((entry) => entry.projectName && entry.projectName !== "备注" ? entry.projectName : entry.remark || "备注")).size;
-  const avgDailyHours = activeDays ? totalHours / activeDays : 0;
-  const spanDays = dateDistance(start, end) + 1;
-  const trendTitle = spanDays > 62 ? "每月趋势" : "每日趋势";
-  const pieCards: Array<{ title: string; dimension: "workNature" | "workCategory" | "projectName" | "workForm" }> = [
-    { title: "工作性质", dimension: "workNature" },
-    { title: "工作类别", dimension: "workCategory" },
-    { title: "关联项目", dimension: "projectName" },
-    { title: "工作形式", dimension: "workForm" },
-  ];
-
-  return (
-    <>
-      <PageHeader
-        title="分析"
-        action={
-          <AnalyticsTitleToolbar
-            granularity={granularity}
-            anchorDate={anchorDate}
-            onGranularityChange={setGranularity}
-            onAnchorDateChange={setAnchorDate}
-          />
-        }
-      />
-      <div className="grid gap-4 lg:grid-cols-4">
-        <StatCard label="总工时" value={`${totalHours.toFixed(1)}h`} hint={`${start} 至 ${end}`} />
-        <StatCard label="记录天数" value={String(activeDays)} hint={`范围共 ${spanDays} 天`} />
-        <StatCard label="日均工时" value={`${avgDailyHours.toFixed(1)}h`} hint="按有记录日期计算" />
-        <StatCard label="关联项目" value={String(projectCount)} hint={`${entries.length} 条正式记录`} />
-      </div>
-      <Card className="mt-5">
-        <CardHeader title={trendTitle} action={<Badge tone="blue">{totalHours.toFixed(1)}h</Badge>} />
-        <div className="p-4">
-          <TrendBarChart entries={entries} startDate={start} endDate={end} />
-        </div>
-      </Card>
-      <div className="mt-5 grid gap-5 xl:grid-cols-2">
-        {pieCards.map((card) => (
-          <Card key={card.dimension}>
-            <CardHeader title={card.title} />
-            <div className="p-4">
-              {entries.length ? <BreakdownPieChart entries={entries} dimension={card.dimension} /> : <EmptyState icon={<ChartPie className="size-5" />} title="暂无数据" text="选择包含正式工时的日期范围。" />}
-            </div>
-          </Card>
-        ))}
-      </div>
-    </>
-  );
-}
-
-function dateDistance(start: string, end: string) {
-  const startDate = new Date(`${start}T00:00:00`);
-  const endDate = new Date(`${end}T00:00:00`);
-  return Math.max(0, Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000));
-}
-
-function ImportExportPage({ state, month, save, setNotice }: PageProps) {
-  const [importing, setImporting] = useState<"excel" | "json" | null>(null);
-  const mergeImportedTemplates = (incoming: WorkTemplate[], retained: WorkTemplate[], projects: Project[], preferredBySignature = new Map<string, WorkTemplate>()) => {
-    const templates = new Map<string, WorkTemplate>();
-    const normalizedIncoming = incoming.map((template) => {
-      const preferred = preferredBySignature.get(templateSignature(template));
-      if (!preferred) return template;
-      return {
-        ...template,
-        id: preferred.id,
-        enabled: preferred.enabled,
-        archived: preferred.archived ?? template.archived,
-        createdAt: preferred.createdAt || template.createdAt,
-      };
-    });
-    [...retained, ...normalizedIncoming].filter((template) => isTemplateAllowed(template, projects)).forEach((template) => {
-      const key = templateSignature(template);
-      const existing = templates.get(key);
-      if (!existing) {
-        templates.set(key, { ...template, remarkOptions: normalizeRemarkOptions(template), weight: clampTemplateWeight(template.weight || 1) });
-        return;
-      }
-      const remarkOptions = [...new Set([...normalizeRemarkOptions(existing), ...normalizeRemarkOptions(template)])].slice(0, 12);
-      templates.set(key, {
-        ...existing,
-        remark: existing.remark || remarkOptions[0],
-        remarkOptions,
-        weight: clampTemplateWeight(Math.max(existing.weight || 1, template.weight || 1)),
-        updatedAt: now(),
-      });
-    });
-    return [...templates.values()];
-  };
-  const handleFile = async (event: ChangeEvent<HTMLInputElement>, kind: "excel" | "json") => {
-    const file = event.target.files?.[0];
-    if (!file) return;
-    try {
-      setImporting(kind);
-      setNotice("正在导入文件");
-      if (kind === "json") {
-        const backup = await importWorkspaceBackupJson(file);
-        if (backup) {
-          await save({
-            ...backup.workspace,
-            jobs: [backup.job, ...backup.workspace.jobs],
-          }, backup.summary);
-          return;
-        }
-      }
-      const result = kind === "excel" ? await importExcelWorkbook(file) : await importConfigJson(file);
-      const retainedProjects = kind === "excel" ? state.projects.filter((project) => project.source !== "excel") : state.projects;
-      const projectNames = new Set(retainedProjects.map((project) => project.name));
-      const newProjects = (result.projects || []).filter((project) => !projectNames.has(project.name));
-      const projects = [...newProjects, ...retainedProjects];
-      const retainedTemplates = kind === "excel" ? state.templates.filter((template) => !template.id.startsWith("template_xlsx_")) : state.templates;
-      const preferredBySignature = new Map<string, WorkTemplate>();
-      state.templates.forEach((template) => {
-        const key = templateSignature(template);
-        const existing = preferredBySignature.get(key);
-        if (!existing || existing.id.startsWith("template_xlsx_")) preferredBySignature.set(key, template);
-      });
-      const templates = mergeImportedTemplates(result.templates || [], retainedTemplates, projects, preferredBySignature);
-      const templateIds = new Set(templates.map((template) => template.id));
-      const monthlyTemplateSettings = (state.monthlyTemplateSettings || []).filter((setting) => templateIds.has(setting.templateId));
-      const entries = kind === "excel" ? mergeContinuousEntries([...state.entries.filter((entry) => entry.source !== "excel"), ...(result.entries || [])]) : result.entries ? mergeContinuousEntries([...state.entries, ...result.entries]) : state.entries;
-      const nextStateForMonthSettings = { ...state, projects, templates, entries, monthlyTemplateSettings };
-      const currentMonthSettings = getMonthTemplateSettings(nextStateForMonthSettings, month);
-      await save({
-        projects,
-        templates,
-        entries,
-        monthlyTemplateSettings: [
-          ...monthlyTemplateSettings.filter((setting) => setting.month !== month),
-          ...currentMonthSettings,
-        ],
-        jobs: [...result.jobs, ...state.jobs],
-      }, result.summary);
-    } catch (error) {
-      const job = { id: createId("job"), kind: kind === "excel" ? "excel_import" as const : "json_import" as const, fileName: file.name, status: "failed" as const, errorText: String(error), createdAt: now() };
-      await save({ jobs: [job, ...state.jobs] }, "导入失败");
-    } finally {
-      setImporting(null);
-      event.target.value = "";
-    }
-  };
-  const exportExcel = async () => {
-    const job = exportMonthExcel(state.entries, month, state.profile);
-    await save({ jobs: [job, ...state.jobs] }, job.summary);
-  };
-  const exportWorkspace = async () => {
-    const job = exportWorkspaceJson(state);
-    await save({ jobs: [job, ...state.jobs] }, job.summary);
-  };
-  return (
-    <>
-      <div className="grid gap-5 lg:grid-cols-4">
-        <Card className="p-5"><Upload className="mb-4 size-6 text-accent" /><h2 className="font-semibold">导入 Excel</h2><p className="mt-1 text-sm text-muted">导入项目清单、一级二级菜单和 2026 年及以后的月度填报历史。</p><label className="mt-4 inline-flex"><input className="sr-only" type="file" accept=".xlsx,.xls" disabled={Boolean(importing)} onChange={(event) => handleFile(event, "excel")} /><span className="inline-flex h-9 items-center rounded-lg border border-line/10 bg-white/70 px-4 text-sm font-semibold transition hover:bg-white dark:bg-white/10">{importing === "excel" ? "正在导入" : "选择 Excel"}</span></label></Card>
-        <Card className="p-5"><Upload className="mb-4 size-6 text-accent" /><h2 className="font-semibold">导入数据</h2><p className="mt-1 text-sm text-muted">恢复 Workhour Studio 数据文件；旧配置文件会自动转为模板。</p><label className="mt-4 inline-flex"><input className="sr-only" type="file" accept=".json" disabled={Boolean(importing)} onChange={(event) => handleFile(event, "json")} /><span className="inline-flex h-9 items-center rounded-lg border border-line/10 bg-white/70 px-4 text-sm font-semibold transition hover:bg-white dark:bg-white/10">{importing === "json" ? "正在导入" : "选择 JSON"}</span></label></Card>
-        <Card className="p-5"><Download className="mb-4 size-6 text-accent" /><h2 className="font-semibold">导出数据</h2><p className="mt-1 text-sm text-muted">保存项目库、模板、月度权重、日程和工时记录。</p><Button className="mt-4" variant="primary" onClick={exportWorkspace}>导出数据</Button></Card>
-        <Card className="p-5"><Download className="mb-4 size-6 text-accent" /><h2 className="font-semibold">导出 Excel</h2><p className="mt-1 text-sm text-muted">导出当前月份，包含日程中的全部工时记录。</p><Button className="mt-4" variant="primary" onClick={exportExcel}>导出 {month}</Button></Card>
-      </div>
-      <Card className="mt-5">
-        <CardHeader title="导入导出历史" />
-        {state.jobs.length === 0 ? <div className="p-5"><EmptyState icon={<FileSpreadsheet className="size-5" />} title="暂无导入导出历史" text="导入文件或导出月度 Excel 后，处理结果会显示在这里。" /></div> : <div className="overflow-auto scrollbar-soft">
-          <table className="table-glass w-full min-w-[760px] text-left text-sm">
-            <thead className="border-b border-line/10 text-xs text-muted"><tr><th className="px-5 py-3">时间</th><th className="px-5 py-3">类型</th><th className="px-5 py-3">文件</th><th className="px-5 py-3">结果</th><th className="px-5 py-3">摘要</th></tr></thead>
-            <tbody>{state.jobs.map((job) => <tr key={job.id} className="border-b border-line/10"><td className="px-5 py-3 text-muted">{job.createdAt.slice(0, 19).replace("T", " ")}</td><td className="px-5 py-3">{job.kind}</td><td className="px-5 py-3">{job.fileName}</td><td className="px-5 py-3"><Badge tone={job.status === "success" ? "blue" : "red"}>{job.status === "success" ? "成功" : "失败"}</Badge></td><td className="px-5 py-3 text-muted">{job.summary || job.errorText || "-"}</td></tr>)}</tbody>
-          </table>
-        </div>}
-      </Card>
-    </>
-  );
-}
-
-function SettingsPage({ state, save }: PageProps) {
-  const [profile, setProfile] = useState(state.profile);
-  return (
-    <>
-      <PageHeader title="设置" description="维护默认作息、主题和显示偏好。" action={<Button variant="primary" onClick={() => save({ profile: { ...profile, updatedAt: now() } }, "设置已保存")}>保存设置</Button>} />
-      <Card className="max-w-3xl p-5">
-        <div className="grid gap-4 md:grid-cols-2">
-          <Field label="默认开始"><Input type="time" value={profile.defaultStart} onChange={(e) => setProfile({ ...profile, defaultStart: e.target.value })} /></Field>
-          <Field label="默认结束"><Input type="time" value={profile.defaultEnd} onChange={(e) => setProfile({ ...profile, defaultEnd: e.target.value })} /></Field>
-          <Field label="午休开始"><Input type="time" value={profile.lunchStart} onChange={(e) => setProfile({ ...profile, lunchStart: e.target.value })} /></Field>
-          <Field label="午休结束"><Input type="time" value={profile.lunchEnd} onChange={(e) => setProfile({ ...profile, lunchEnd: e.target.value })} /></Field>
-        </div>
-      </Card>
     </>
   );
 }

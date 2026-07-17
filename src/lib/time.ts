@@ -56,6 +56,12 @@ export const shiftDate = (date: string, diffDays: number) => {
   return toIsoDate(next);
 };
 
+export const dateDistance = (start: string, end: string) => {
+  const startDate = new Date(`${start}T00:00:00`);
+  const endDate = new Date(`${end}T00:00:00`);
+  return Math.round((endDate.getTime() - startDate.getTime()) / 86_400_000);
+};
+
 export const getStartOfWeek = (date: string) => shiftDate(date, 1 - getWeekday(date));
 
 export const getWeekDates = (date: string) => {
