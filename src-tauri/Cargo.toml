@@ -1,6 +1,6 @@
 [package]
 name = "workhour-studio"
-version = "0.2.0"
+version = "0.2.1"
 description = "Local-first workhour management studio"
 authors = ["workhour-studio"]
 license = "MIT"
