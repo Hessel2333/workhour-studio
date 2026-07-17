@@ -2,5 +2,5 @@
 #![cfg_attr(not(debug_assertions), windows_subsystem = "windows")]
 
 fn main() {
-  workhour_studio_lib::run();
+    workhour_studio_lib::run();
 }
