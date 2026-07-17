@@ -23,11 +23,11 @@ jobs:
             signing_identity: ""
           - name: macOS Apple Silicon
             platform: macos-latest
-            args: --bundles dmg --target aarch64-apple-darwin
+            args: --target aarch64-apple-darwin
             signing_identity: "-"
           - name: macOS Intel
             platform: macos-latest
-            args: --bundles dmg --target x86_64-apple-darwin
+            args: --target x86_64-apple-darwin
             signing_identity: "-"
 
     steps:
