@@ -19,6 +19,20 @@ npm run tauri:dev
 
 Windows 桌面构建需要安装 Visual Studio Build Tools，并包含 Visual C++ 工具链。
 
+## 下载与发布
+
+桌面安装包通过 GitHub Releases 提供：
+
+- Windows x64：NSIS `setup.exe`
+- macOS Apple Silicon：`aarch64.dmg`
+- macOS Intel：`x64.dmg`
+
+推送 `app-v*` 标签或在 GitHub Actions 中手动运行 `Publish desktop app`，会创建与
+`src-tauri/tauri.conf.json` 版本一致的草稿 Release。
+
+桌面版首次启动会为当前系统用户自动创建本地 SQLite 数据库。新用户可以直接使用空白工作区，
+也可以在“导入导出”页面导入旧 Excel；完整迁移建议使用 Workhour Studio JSON 数据备份。
+
 ## 已实现
 
 - Tauri + Vite + React + TypeScript 工程骨架
@@ -38,4 +52,3 @@ Windows 桌面构建需要安装 Visual Studio Build Tools，并包含 Visual C+
 - `reference/autofill_workhour`
 - `reference/workhour_webfill`
 - `reference/work_trail`
-

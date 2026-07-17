@@ -4,12 +4,13 @@
   "description": "Local-first timesheet studio for maintaining projects, templates, schedules, and Excel-compatible workhour records.",
   "scripts": {
     "dev": "vite",
-    "build": "tsc && vite build",
+    "build": "node node_modules/typescript/bin/tsc && vite build",
     "preview": "vite preview",
     "tauri": "tauri",
-    "tauri:dev": "tauri dev",
+    "tauri:dev": "node scripts/tauri-dev.mjs",
+    "tauri:dev:raw": "tauri dev",
     "tauri:build": "tauri build",
-    "check": "tsc --noEmit"
+    "check": "node node_modules/typescript/bin/tsc --noEmit"
   },
   "keywords": [],
   "author": "",

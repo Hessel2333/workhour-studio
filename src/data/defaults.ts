@@ -1,4 +1,4 @@
-import type { MonthlyTemplateSetting, Profile, Project, TimesheetEntry, WorkTemplate, WorkspaceState } from "./types";
+import type { MonthlyTemplateSetting, Profile, Project, TemplatePreset, TimesheetEntry, WorkTemplate, WorkspaceState } from "./types";
 
 const now = () => new Date().toISOString();
 
@@ -21,6 +21,7 @@ export const seedProjects: Project[] = [
     id: createId("project"),
     name: "研究院智慧信息系统建设与应用探索",
     category: "探索项目",
+    ownerScope: "self",
     status: "active",
     source: "manual",
     isFavorite: true,
@@ -32,6 +33,7 @@ export const seedProjects: Project[] = [
     name: "滚塑成型聚合物微观结构表征",
     code: "25NM022",
     category: "院控项目",
+    ownerScope: "self",
     status: "active",
     source: "manual",
     isFavorite: true,
@@ -126,12 +128,25 @@ export const seedMonthlyTemplateSettings: MonthlyTemplateSetting[] = seedTemplat
   updatedAt: now(),
 }));
 
+export const seedTemplatePresets: TemplatePreset[] = [{
+  id: createId("template_preset"),
+  name: "默认方案",
+  settings: seedMonthlyTemplateSettings.map((setting) => ({
+    templateId: setting.templateId,
+    enabled: setting.enabled,
+    weight: setting.weight,
+  })),
+  createdAt: now(),
+  updatedAt: now(),
+}];
+
 export const createSeedState = (): WorkspaceState => ({
   profile: { ...defaultProfile },
   projects: [...seedProjects],
   aliases: [],
   templates: [...seedTemplates],
   monthlyTemplateSettings: [...seedMonthlyTemplateSettings],
+  templatePresets: [...seedTemplatePresets],
   blocks: [],
   entries: [...seedEntries],
   jobs: [],

@@ -8,4 +8,8 @@ src-tauri/gen/
 *.tsbuildinfo
 ~$*
 *.log
-
+.codex-run/
+backups/
+.DS_Store
+.codex-run/
+backups/

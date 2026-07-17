@@ -1,6 +1,6 @@
 export type ThemeMode = "light" | "dark" | "system";
 export type PageKey = "dashboard" | "schedule" | "projects" | "templates" | "timesheet" | "analytics" | "guide" | "importExport" | "settings";
-export type EntryStatus = "confirmed" | "draft";
+export type EntryStatus = "confirmed";
 export type TemplateKind = "random" | "fixed" | "weekend_lecture";
 
 export interface Profile {
@@ -21,6 +21,8 @@ export interface Project {
   name: string;
   code?: string;
   category: string;
+  remark?: string;
+  ownerScope?: "self" | "other";
   status: "active" | "closed" | "paused";
   beginDate?: string;
   endDate?: string;
@@ -66,6 +68,20 @@ export interface MonthlyTemplateSetting {
   templateId: string;
   enabled: boolean;
   weight: number;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TemplatePresetSetting {
+  templateId: string;
+  enabled: boolean;
+  weight: number;
+}
+
+export interface TemplatePreset {
+  id: string;
+  name: string;
+  settings: TemplatePresetSetting[];
   createdAt: string;
   updatedAt: string;
 }
@@ -121,6 +137,7 @@ export interface WorkspaceState {
   aliases: ProjectAlias[];
   templates: WorkTemplate[];
   monthlyTemplateSettings: MonthlyTemplateSetting[];
+  templatePresets: TemplatePreset[];
   blocks: TimeBlock[];
   entries: TimesheetEntry[];
   jobs: ImportExportJob[];

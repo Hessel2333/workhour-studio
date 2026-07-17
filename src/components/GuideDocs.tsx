@@ -22,7 +22,7 @@ const guideDocs: GuideDoc[] = [
   { id: "overview", label: "快速开始", description: "先看清这套工作台的主链路。", markdown: overviewMarkdown },
   { id: "menu-rules", label: "菜单规则", description: "工作性质、类别、项目和形式如何联动。", markdown: menuRulesMarkdown },
   { id: "projects", label: "项目与模板", description: "项目库和模板库的维护口径。", markdown: projectsMarkdown },
-  { id: "schedule", label: "日程与补全", description: "时间块、草稿和自动补全的使用方式。", markdown: scheduleMarkdown },
+  { id: "schedule", label: "日程与补全", description: "时间块和自动补全的使用方式。", markdown: scheduleMarkdown },
   { id: "import-export", label: "导入导出", description: "Excel 与旧流程如何衔接。", markdown: importExportMarkdown },
 ];
 

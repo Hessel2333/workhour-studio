@@ -7,6 +7,8 @@ import type {
   Profile,
   Project,
   ProjectAlias,
+  TemplatePreset,
+  TemplatePresetSetting,
   TimeBlock,
   TimesheetEntry,
   WorkTemplate,
@@ -28,6 +30,24 @@ function parseStringArray(value: unknown) {
     return Array.isArray(parsed) ? parsed.map(String).filter(Boolean) : undefined;
   } catch {
     return undefined;
+  }
+}
+
+function parsePresetSettings(value: unknown): TemplatePresetSetting[] {
+  if (!value) return [];
+  try {
+    const parsed = JSON.parse(String(value));
+    if (!Array.isArray(parsed)) return [];
+    return parsed
+      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object" && !Array.isArray(item)))
+      .map((item) => ({
+        templateId: String(item.templateId || item.template_id || ""),
+        enabled: Boolean(item.enabled),
+        weight: Number(item.weight || 1),
+      }))
+      .filter((item) => item.templateId);
+  } catch {
+    return [];
   }
 }
 
@@ -54,6 +74,8 @@ const mapProject = (row: Record<string, unknown>): Project => ({
   name: String(row.name),
   code: row.code ? String(row.code) : undefined,
   category: String(row.category),
+  remark: row.remark ? String(row.remark) : undefined,
+  ownerScope: row.owner_scope === "other" ? "other" : "self",
   status: (row.status as Project["status"]) || "active",
   beginDate: row.begin_date ? String(row.begin_date) : undefined,
   endDate: row.end_date ? String(row.end_date) : undefined,
@@ -91,6 +113,14 @@ const mapMonthlyTemplateSetting = (row: Record<string, unknown>): MonthlyTemplat
   templateId: String(row.template_id),
   enabled: Boolean(row.enabled),
   weight: Number(row.weight || 1),
+  createdAt: String(row.created_at),
+  updatedAt: String(row.updated_at),
+});
+
+const mapTemplatePreset = (row: Record<string, unknown>): TemplatePreset => ({
+  id: String(row.id),
+  name: String(row.name),
+  settings: parsePresetSettings(row.settings_json),
   createdAt: String(row.created_at),
   updatedAt: String(row.updated_at),
 });
@@ -167,6 +197,12 @@ async function getSqlDb() {
     if (!(await hasColumn(sqlDb, "work_templates", "archived"))) {
       await sqlDb.execute("ALTER TABLE work_templates ADD COLUMN archived INTEGER NOT NULL DEFAULT 0");
     }
+    if (!(await hasColumn(sqlDb, "projects", "remark"))) {
+      await sqlDb.execute("ALTER TABLE projects ADD COLUMN remark TEXT");
+    }
+    if (!(await hasColumn(sqlDb, "projects", "owner_scope"))) {
+      await sqlDb.execute("ALTER TABLE projects ADD COLUMN owner_scope TEXT NOT NULL DEFAULT 'self'");
+    }
     return sqlDb;
   } catch (error) {
     console.warn("SQLite unavailable, using browser storage fallback.", error);
@@ -187,6 +223,29 @@ const loadFallback = () => {
 
 const saveFallback = (state: WorkspaceState) => localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 
+async function syncCollection<T extends { id: string }>(
+  db: SqlDb,
+  table: string,
+  currentItems: T[] | undefined,
+  nextItems: T[],
+  upsert: (item: T) => Promise<void>,
+) {
+  const currentById = new Map((currentItems || []).map((item) => [item.id, item]));
+  const nextById = new Map(nextItems.map((item) => [item.id, item]));
+
+  await Promise.all(
+    [...currentById.keys()]
+      .filter((id) => !nextById.has(id))
+      .map((id) => db.execute(`DELETE FROM ${table} WHERE id = ?`, [id])),
+  );
+
+  await Promise.all(
+    nextItems
+      .filter((item) => JSON.stringify(currentById.get(item.id)) !== JSON.stringify(item))
+      .map(upsert),
+  );
+}
+
 export async function loadWorkspace(): Promise<WorkspaceState> {
   const db = await getSqlDb();
   if (!db) return loadFallback();
@@ -196,12 +255,13 @@ export async function loadWorkspace(): Promise<WorkspaceState> {
     await upsertProfile(defaultProfile);
   }
 
-  const [profiles, projects, aliases, templates, monthlyTemplateSettings, blocks, entries, jobs] = await Promise.all([
+  const [profiles, projects, aliases, templates, monthlyTemplateSettings, templatePresets, blocks, entries, jobs] = await Promise.all([
     db.select<Record<string, unknown>[]>("SELECT * FROM profiles LIMIT 1"),
     db.select<Record<string, unknown>[]>("SELECT * FROM projects ORDER BY is_favorite DESC, updated_at DESC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM project_aliases ORDER BY created_at DESC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM work_templates ORDER BY enabled DESC, schedule_kind, updated_at DESC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM monthly_template_settings ORDER BY month DESC, updated_at DESC"),
+    db.select<Record<string, unknown>[]>("SELECT * FROM template_presets ORDER BY updated_at DESC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM time_blocks ORDER BY work_date DESC, start_time ASC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM timesheet_entries ORDER BY work_date DESC, start_time ASC"),
     db.select<Record<string, unknown>[]>("SELECT * FROM import_exports ORDER BY created_at DESC LIMIT 100"),
@@ -213,6 +273,7 @@ export async function loadWorkspace(): Promise<WorkspaceState> {
     aliases: aliases.map(mapAlias),
     templates: templates.map(mapTemplate),
     monthlyTemplateSettings: monthlyTemplateSettings.map(mapMonthlyTemplateSetting),
+    templatePresets: templatePresets.map(mapTemplatePreset),
     blocks: blocks.map(mapBlock),
     entries: entries.map(mapEntry),
     jobs: jobs.map(mapJob),
@@ -230,6 +291,7 @@ export async function replaceWorkspace(state: WorkspaceState) {
   await db.execute("DELETE FROM time_blocks");
   await db.execute("DELETE FROM timesheet_entries");
   await db.execute("DELETE FROM monthly_template_settings");
+  await db.execute("DELETE FROM template_presets");
   await db.execute("DELETE FROM work_templates");
   await db.execute("DELETE FROM projects");
   await db.execute("DELETE FROM import_exports");
@@ -240,6 +302,7 @@ export async function replaceWorkspace(state: WorkspaceState) {
   await Promise.all(state.aliases.map(upsertAlias));
   await Promise.all(state.templates.map(upsertTemplate));
   await Promise.all((state.monthlyTemplateSettings || []).map(upsertMonthlyTemplateSetting));
+  await Promise.all((state.templatePresets || []).map(upsertTemplatePreset));
   await Promise.all(state.blocks.map(upsertBlock));
   await Promise.all(state.entries.map(upsertEntry));
   await Promise.all(state.jobs.map(upsertJob));
@@ -254,32 +317,28 @@ export async function saveStatePatch(patch: Partial<WorkspaceState>, current: Wo
   }
   if (patch.profile) await upsertProfile(patch.profile);
   if (patch.projects) {
-    await db.execute("DELETE FROM projects");
-    await Promise.all(patch.projects.map(upsertProject));
+    await syncCollection(db, "projects", current.projects, patch.projects, upsertProject);
   }
   if (patch.aliases) {
-    await db.execute("DELETE FROM project_aliases");
-    await Promise.all(patch.aliases.map(upsertAlias));
+    await syncCollection(db, "project_aliases", current.aliases, patch.aliases, upsertAlias);
   }
   if (patch.templates) {
-    await db.execute("DELETE FROM work_templates");
-    await Promise.all(patch.templates.map(upsertTemplate));
+    await syncCollection(db, "work_templates", current.templates, patch.templates, upsertTemplate);
   }
   if (patch.monthlyTemplateSettings) {
-    await db.execute("DELETE FROM monthly_template_settings");
-    await Promise.all(patch.monthlyTemplateSettings.map(upsertMonthlyTemplateSetting));
+    await syncCollection(db, "monthly_template_settings", current.monthlyTemplateSettings, patch.monthlyTemplateSettings, upsertMonthlyTemplateSetting);
+  }
+  if (patch.templatePresets) {
+    await syncCollection(db, "template_presets", current.templatePresets, patch.templatePresets, upsertTemplatePreset);
   }
   if (patch.blocks) {
-    await db.execute("DELETE FROM time_blocks");
-    await Promise.all(patch.blocks.map(upsertBlock));
+    await syncCollection(db, "time_blocks", current.blocks, patch.blocks, upsertBlock);
   }
   if (patch.entries) {
-    await db.execute("DELETE FROM timesheet_entries");
-    await Promise.all(patch.entries.map(upsertEntry));
+    await syncCollection(db, "timesheet_entries", current.entries, patch.entries, upsertEntry);
   }
   if (patch.jobs) {
-    await db.execute("DELETE FROM import_exports");
-    await Promise.all(patch.jobs.map(upsertJob));
+    await syncCollection(db, "import_exports", current.jobs, patch.jobs, upsertJob);
   }
   return next;
 }
@@ -320,13 +379,15 @@ export async function upsertProject(project: Project) {
   const db = await getSqlDb();
   if (!db) return;
   await db.execute(
-    `INSERT OR REPLACE INTO projects (id, name, code, category, status, begin_date, end_date, source, is_favorite, created_at, updated_at)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    `INSERT OR REPLACE INTO projects (id, name, code, category, remark, owner_scope, status, begin_date, end_date, source, is_favorite, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     [
       project.id,
       project.name,
       project.code ?? null,
       project.category,
+      project.remark ?? null,
+      project.ownerScope ?? "self",
       project.status,
       project.beginDate ?? null,
       project.endDate ?? null,
@@ -393,6 +454,23 @@ export async function upsertMonthlyTemplateSetting(setting: MonthlyTemplateSetti
       setting.weight,
       setting.createdAt || now(),
       setting.updatedAt || now(),
+    ],
+  );
+}
+
+export async function upsertTemplatePreset(preset: TemplatePreset) {
+  const db = await getSqlDb();
+  if (!db) return;
+  await db.execute(
+    `INSERT OR REPLACE INTO template_presets
+     (id, name, settings_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?)`,
+    [
+      preset.id,
+      preset.name,
+      JSON.stringify(preset.settings || []),
+      preset.createdAt || now(),
+      preset.updatedAt || now(),
     ],
   );
 }

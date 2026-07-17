@@ -62,6 +62,13 @@ export const migrations = [
     updated_at TEXT NOT NULL,
     UNIQUE(month, template_id)
   )`,
+  `CREATE TABLE IF NOT EXISTS template_presets (
+    id TEXT PRIMARY KEY,
+    name TEXT NOT NULL,
+    settings_json TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  )`,
   `CREATE TABLE IF NOT EXISTS time_blocks (
     id TEXT PRIMARY KEY,
     work_date TEXT NOT NULL,

@@ -5,8 +5,7 @@
   "identifier": "studio.workhour.app",
   "build": {
     "frontendDist": "../dist",
-    "devUrl": "http://localhost:5174",
-    "beforeDevCommand": "npm run dev",
+    "devUrl": "http://127.0.0.1:5174",
     "beforeBuildCommand": "npm run build"
   },
   "app": {

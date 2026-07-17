@@ -1,9 +1,10 @@
 import * as XLSX from "xlsx";
 import { createId } from "../data/defaults";
-import type { ImportExportJob, ImportResult, Project, TimesheetEntry, WorkTemplate } from "../data/types";
+import type { ImportExportJob, ImportResult, Profile, Project, TimesheetEntry, WorkTemplate } from "../data/types";
 import { dateForMonthDay, durationHours, fromMinutes, sameEntryBody, toMinutes } from "../lib/time";
 
 type RawRow = Record<string, unknown>;
+type ExportCell = string | number | null;
 
 const now = () => new Date().toISOString();
 
@@ -111,9 +112,25 @@ const normalizeRemarkOptions = (values: Array<string | undefined>) =>
 const projectRequiredCategories = new Set(["总部项目", "公司项目", "院控项目", "创新创效", "探索项目", "其他科研生产"]);
 const requiresProject = (workCategory: string) => projectRequiredCategories.has(workCategory);
 const hasLinkedProject = (projectName?: string) => Boolean(projectName && projectName !== "备注");
+const defaultExportStart = "08:00";
+const defaultExportEnd = "17:00";
+const validProjectCategories = new Set(["总部项目", "公司项目", "院控项目", "探索项目"]);
+
+const normalizeProjectCategory = (name = "", code = "", category = "") => {
+  const raw = `${category} ${code} ${name}`.toUpperCase();
+  if (validProjectCategories.has(category)) return category;
+  if (raw.includes("NM")) return "院控项目";
+  if (raw.includes("KF") || raw.includes("KY")) return "公司项目";
+  if (raw.includes("总部")) return "总部项目";
+  if (raw.includes("公司")) return "公司项目";
+  if (raw.includes("院控")) return "院控项目";
+  if (raw.includes("探索")) return "探索项目";
+  return "探索项目";
+};
 
 const pushTemplate = (templates: Map<string, WorkTemplate>, template: Omit<WorkTemplate, "id" | "createdAt" | "updatedAt">) => {
-  if (!template.workNature || !template.workCategory || !template.workForm) return;
+  if (!template.workNature || !template.workCategory) return;
+  if (template.workNature !== "请假" && !template.workForm) return;
   if (requiresProject(template.workCategory) && !hasLinkedProject(template.projectName)) return;
   const next: WorkTemplate = {
     id: createId("template_xlsx"),
@@ -133,21 +150,26 @@ const importProjectList = (workbook: XLSX.WorkBook) => {
 
   const header = rows[headerIndex];
   const nameIndex = indexByHeader(header, ["关联项目", "项目名称"]);
-  const categoryIndex = indexByHeader(header, ["备注", "类别"]);
+  const categoryIndex = indexByHeader(header, ["项目类别", "类别"]);
+  const remarkIndex = indexByHeader(header, ["备注"]);
   const codeIndex = indexByHeader(header, ["项目号", "项目编号"]);
   const projects = new Map<string, Project>();
 
   for (const row of rows.slice(headerIndex + 1)) {
     const name = text(row[nameIndex]);
     if (!name || name === "备注") continue;
-    const category = text(row[categoryIndex]) || "其他科研生产";
     const code = text(row[codeIndex]);
+    const rawCategory = categoryIndex >= 0 ? text(row[categoryIndex]) : "";
+    const remark = remarkIndex >= 0 ? text(row[remarkIndex]) : "";
+    const category = normalizeProjectCategory(name, code, rawCategory);
     if (!projects.has(name)) {
       projects.set(name, {
         id: createId("project"),
         name,
         code: code || undefined,
         category,
+        remark: remark || undefined,
+        ownerScope: "self",
         status: "active",
         source: "excel",
         isFavorite: true,
@@ -202,7 +224,7 @@ const importHistoryTemplates = (entries: TimesheetEntry[], projects: Project[]) 
     if (requiresProject(workCategory) && !hasLinkedProject(projectName)) return;
     const template: WorkTemplate = {
       id: createId("template_xlsx"),
-      name: projectName !== "备注" ? `${projectName} / ${entry.workForm}` : `${entry.workCategory} / ${entry.workForm}`,
+      name: projectName !== "备注" ? `${projectName}${entry.workForm ? ` / ${entry.workForm}` : ""}` : `${entry.workCategory}${entry.workForm ? ` / ${entry.workForm}` : ""}`,
       workNature: entry.workNature,
       workCategory,
       projectName,
@@ -282,15 +304,16 @@ export async function importExcelWorkbook(file: File): Promise<ImportResult> {
       const hasContent = Object.values(body).some((value) => String(value ?? "").trim());
       if (!hasContent) continue;
 
+      const workNature = normalizeWorkNature(body.workNature, "科研工作");
       entries.push({
         id: createId("entry"),
         workDate: dateForMonthDay(parsed.key, currentDay),
         startTime,
         endTime,
-        workNature: normalizeWorkNature(body.workNature, "科研工作"),
+        workNature,
         workCategory: String(body.workCategory || "其他科研生产"),
         projectName: String(body.projectName || "备注"),
-        workForm: String(body.workForm || "其他"),
+        workForm: workNature === "请假" ? "" : String(body.workForm || "其他"),
         remark: body.remark ? String(body.remark) : undefined,
         collaborator: body.collaborator ? String(body.collaborator) : undefined,
         status: "confirmed",
@@ -343,13 +366,14 @@ export async function importConfigJson(file: File): Promise<ImportResult> {
   const templates: WorkTemplate[] = [];
 
   for (const item of json.随机时段工作内容 || []) {
+    const workNature = normalizeWorkNature(item.工作性质, "科研工作");
     templates.push({
       id: createId("template"),
       name: item.备注 || item.工作形式 || "工作模板",
-      workNature: normalizeWorkNature(item.工作性质, "科研工作"),
+      workNature,
       workCategory: item.工作类别 || "其他科研生产",
       projectName: item.关联项目 || item.内容属性 || "备注",
-      workForm: item.工作形式 || "其他",
+      workForm: workNature === "请假" ? "" : item.工作形式 || "其他",
       remark: item.备注 || "",
       remarkOptions: normalizeRemarkOptions([item.备注]),
       collaborator: item.共同完成人 || "",
@@ -363,13 +387,14 @@ export async function importConfigJson(file: File): Promise<ImportResult> {
 
   for (const item of json.固定时段工作内容 || []) {
     const fixed = item.固定时段 || {};
+    const workNature = normalizeWorkNature(item.工作性质, "事务性工作");
     templates.push({
       id: createId("template"),
       name: item.描述 || item.备注 || "固定安排",
-      workNature: normalizeWorkNature(item.工作性质, "事务性工作"),
+      workNature,
       workCategory: item.工作类别 || "其他事务性",
       projectName: item.关联项目 || item.内容属性 || "备注",
-      workForm: item.工作形式 || "其他",
+      workForm: workNature === "请假" ? "" : item.工作形式 || "其他",
       remark: item.备注 || "",
       remarkOptions: normalizeRemarkOptions([item.备注]),
       collaborator: item.共同完成人 || "",
@@ -386,13 +411,14 @@ export async function importConfigJson(file: File): Promise<ImportResult> {
 
   if (json.周末讲堂模板) {
     const item = json.周末讲堂模板;
+    const workNature = normalizeWorkNature(item.工作性质, "科研工作");
     templates.push({
       id: createId("template"),
       name: item.备注 || "周末讲堂",
-      workNature: normalizeWorkNature(item.工作性质, "科研工作"),
+      workNature,
       workCategory: item.工作类别 || "其他科研",
       projectName: item.关联项目 || item.内容属性 || "备注",
-      workForm: item.工作形式 || "基地会议",
+      workForm: workNature === "请假" ? "" : item.工作形式 || "基地会议",
       remark: item.备注 || "周末讲堂",
       remarkOptions: normalizeRemarkOptions([item.备注 || "周末讲堂"]),
       collaborator: item.共同完成人 || "",
@@ -421,34 +447,61 @@ export async function importConfigJson(file: File): Promise<ImportResult> {
   return { templates: usableTemplates, jobs, summary: jobs[0].summary || "" };
 }
 
-export function exportMonthExcel(entries: TimesheetEntry[], month: string) {
-  const monthEntries = entries
-    .filter((entry) => entry.status === "confirmed" && entry.workDate.startsWith(month))
-    .sort((a, b) => `${a.workDate} ${a.startTime}`.localeCompare(`${b.workDate} ${b.startTime}`));
-  const rows: Record<string, string | number>[] = [];
-  let lastDay = "";
+const getDaysInMonth = (year: number, month: number) => new Date(year, month, 0).getDate();
 
-  for (const entry of monthEntries) {
-    for (let minute = toMinutes(entry.startTime); minute < toMinutes(entry.endTime); minute += 30) {
-      const day = Number(entry.workDate.slice(-2));
-      const dayText = lastDay === entry.workDate ? "" : day;
-      lastDay = entry.workDate;
-      rows.push({
-        月日: dayText,
-        开始时间: fromMinutes(minute),
-        结束时间: fromMinutes(minute + 30),
-        工作性质: entry.workNature,
-        工作类别: entry.workCategory,
-        关联项目: entry.projectName || "备注",
-        工作形式: entry.workForm,
-        备注: entry.remark || "",
-        共同完成人: entry.collaborator || "",
-      });
+const getExportRange = (profile?: Profile) => {
+  const start = toMinutes(profile?.defaultStart || defaultExportStart);
+  const end = toMinutes(profile?.defaultEnd || defaultExportEnd);
+  if (end <= start) {
+    return { start: toMinutes(defaultExportStart), end: toMinutes(defaultExportEnd) };
+  }
+  return { start, end };
+};
+
+const findSlotEntry = (dayEntries: TimesheetEntry[], slotStart: string, slotEnd: string) =>
+  dayEntries.find((entry) => toMinutes(entry.startTime) < toMinutes(slotEnd) && toMinutes(entry.endTime) > toMinutes(slotStart));
+
+export function exportMonthExcel(entries: TimesheetEntry[], month: string, profile?: Profile) {
+  const [year, mon] = month.split("-");
+  const yearNumber = Number(year);
+  const monthNumber = Number(mon);
+  const monthEntries = entries
+    .filter((entry) => entry.workDate.startsWith(month))
+    .sort((a, b) => `${a.workDate} ${a.startTime}`.localeCompare(`${b.workDate} ${b.startTime}`));
+  const rows: ExportCell[][] = [[`   ${monthNumber}月日`, "开始时间", "结束时间", "工作性质", "工作类别", "关联项目", "工作形式", "备注", "共同完成人"]];
+  let slotCount = 0;
+  const dayCount = getDaysInMonth(yearNumber, monthNumber);
+  const { start, end } = getExportRange(profile);
+
+  for (let day = 1; day <= dayCount; day += 1) {
+    const workDate = `${year}-${String(monthNumber).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
+    const dayEntries = monthEntries.filter((entry) => entry.workDate === workDate);
+    let isFirstSlotOfDay = true;
+
+    for (let minute = start; minute < end; minute += 30) {
+      const slotStart = fromMinutes(minute);
+      const slotEnd = fromMinutes(minute + 30);
+      const entry = findSlotEntry(dayEntries, slotStart, slotEnd);
+      rows.push([
+        isFirstSlotOfDay ? day : null,
+        slotStart,
+        slotEnd,
+        entry?.workNature || null,
+        entry?.workCategory || null,
+        entry?.projectName && entry.projectName !== "备注" ? entry.projectName : null,
+        entry?.workForm || null,
+        entry?.remark || null,
+        entry?.collaborator || null,
+      ]);
+      if (entry) slotCount += 1;
+      isFirstSlotOfDay = false;
     }
+
+    if (day < dayCount) rows.push([]);
   }
 
   const wb = XLSX.utils.book_new();
-  const ws = XLSX.utils.json_to_sheet(rows);
+  const ws = XLSX.utils.aoa_to_sheet(rows);
   ws["!cols"] = [
     { wch: 10 },
     { wch: 10 },
@@ -460,18 +513,17 @@ export function exportMonthExcel(entries: TimesheetEntry[], month: string) {
     { wch: 24 },
     { wch: 14 },
   ];
-  const [year, mon] = month.split("-");
-  XLSX.utils.book_append_sheet(wb, ws, `${year}年${Number(mon)}月`);
-  XLSX.writeFile(wb, `工时_${year}年${Number(mon)}月.xlsx`);
+  XLSX.utils.book_append_sheet(wb, ws, `${year}年${monthNumber}月`);
+  XLSX.writeFile(wb, `工时_${year}年${monthNumber}月.xlsx`);
 
   return {
     id: createId("job"),
     kind: "excel_export" as const,
-    fileName: `工时_${year}年${Number(mon)}月.xlsx`,
+    fileName: `工时_${year}年${monthNumber}月.xlsx`,
     periodStart: month,
     periodEnd: month,
     status: "success" as const,
-    summary: `导出 ${rows.length} 个半小时时段，合计 ${monthEntries.reduce((sum, entry) => sum + durationHours(entry.startTime, entry.endTime), 0)} 小时`,
+    summary: `导出 ${dayCount} 天，${slotCount} 个有效半小时时段，合计 ${monthEntries.reduce((sum, entry) => sum + durationHours(entry.startTime, entry.endTime), 0)} 小时`,
     createdAt: now(),
   };
 }
