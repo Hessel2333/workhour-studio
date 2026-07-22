@@ -84,7 +84,9 @@ button {
   display: grid;
   grid-template-columns: 146px minmax(0, 1fr);
   gap: 16px;
-  min-height: 100dvh;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
   padding: 16px;
 }
 
@@ -111,7 +113,9 @@ button {
   position: sticky;
   top: 16px;
   align-self: start;
-  min-height: calc(100dvh - 32px);
+  height: calc(100dvh - 32px);
+  min-height: 0;
+  overflow: auto;
   border-radius: 28px;
   background: rgb(255 255 255 / 0.74);
   border: 1px solid rgb(255 255 255 / 0.68);
@@ -128,7 +132,8 @@ button {
 .workspace-shell {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  min-height: calc(100dvh - 32px);
+  height: calc(100dvh - 32px);
+  min-height: 0;
   overflow: hidden;
   border-radius: 32px;
   background: rgb(255 255 255 / 0.78);
@@ -267,8 +272,14 @@ button {
 }
 
 .main-stage {
+  min-height: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 22px 24px 28px;
+}
+
+.main-stage:has(> .worktrail-week-layout) {
+  overflow: hidden;
 }
 
 .guide-docs-page {
@@ -535,6 +546,7 @@ button {
   font-size: 0.86rem;
   font-weight: 650;
   letter-spacing: -0.01em;
+  white-space: nowrap;
   transition: background-color 180ms ease, color 180ms ease, transform 180ms ease, box-shadow 180ms ease;
 }
 
@@ -747,35 +759,128 @@ button {
 
 .schedule-title-toolbar {
   position: relative;
-  display: block;
+  display: grid;
+  grid-template-columns: auto minmax(236px, 1fr) auto;
+  gap: 10px;
   width: 100%;
   height: 100%;
+  align-items: center;
   overflow: visible;
+  padding-left: 132px;
 }
 
 .schedule-toolbar-left,
 .schedule-toolbar-right {
-  position: absolute;
-  top: 50%;
   display: inline-flex;
+  min-width: 0;
   align-items: center;
   gap: 10px;
-  transform: translateY(-50%);
 }
 
 .schedule-toolbar-left {
-  left: 132px;
+  grid-column: 1;
+  justify-self: start;
 }
 
 .schedule-toolbar-right {
+  grid-column: 3;
+  justify-self: end;
+}
+
+.schedule-compact-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.schedule-more-menu {
+  position: relative;
+  display: none;
+}
+
+.schedule-more-trigger {
+  list-style: none;
+}
+
+.schedule-more-trigger::-webkit-details-marker {
+  display: none;
+}
+
+.schedule-more-menu[open] .schedule-more-trigger {
+  background: rgb(0 122 255 / 0.1);
+  color: rgb(var(--accent));
+}
+
+.schedule-more-popover {
+  position: absolute;
+  top: calc(100% + 10px);
   right: 0;
+  z-index: 40;
+  display: grid;
+  width: 176px;
+  gap: 3px;
+  border: 1px solid rgb(var(--line) / 0.08);
+  border-radius: 16px;
+  background: rgb(var(--panel) / 0.98);
+  box-shadow: 0 18px 48px rgb(16 24 40 / 0.16);
+  padding: 6px;
+  backdrop-filter: saturate(180%) blur(24px);
+}
+
+.schedule-more-popover button {
+  display: flex;
+  min-height: 36px;
+  align-items: center;
+  gap: 9px;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  color: rgb(var(--ink));
+  padding: 0 10px;
+  font-size: 0.82rem;
+  font-weight: 680;
+  text-align: left;
+}
+
+.schedule-more-popover button:hover {
+  background: rgb(0 122 255 / 0.08);
+  color: rgb(var(--accent));
+}
+
+.schedule-more-popover button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
+.schedule-more-popover button.danger {
+  color: rgb(var(--danger));
+}
+
+.schedule-more-divider {
+  height: 1px;
+  margin: 3px 7px;
+  background: rgb(var(--line) / 0.08);
+}
+
+.schedule-more-status {
+  overflow: hidden;
+  color: rgb(var(--muted));
+  padding: 4px 10px 6px;
+  font-size: 0.7rem;
+  font-weight: 650;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.schedule-delete-button {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
 }
 
 .schedule-period-nav {
-  position: absolute;
-  left: 50%;
-  top: 50%;
-  transform: translate(-50%, -50%);
+  grid-column: 2;
+  justify-self: center;
 }
 
 .toolbar-soft-button,
@@ -793,6 +898,13 @@ button {
   cursor: not-allowed;
   color: rgb(var(--muted) / 0.52);
   opacity: 0.8;
+}
+
+.toolbar-icon-button:disabled {
+  cursor: not-allowed;
+  color: rgb(var(--muted) / 0.42);
+  opacity: 0.7;
+  transform: none;
 }
 
 .toolbar-danger-button:disabled {
@@ -853,6 +965,16 @@ button {
 .dark .toolbar-danger-button {
   background: rgb(255 69 58 / 0.15);
   color: rgb(255 128 120);
+}
+
+.dark .schedule-more-popover {
+  border-color: rgb(255 255 255 / 0.07);
+  background: rgb(28 31 39 / 0.98);
+  box-shadow: 0 20px 52px rgb(0 0 0 / 0.36);
+}
+
+.dark .schedule-more-divider {
+  background: rgb(255 255 255 / 0.07);
 }
 
 .dashboard-main-grid {
@@ -1540,14 +1662,18 @@ button {
   display: grid;
   grid-template-columns: 300px minmax(0, 1fr);
   gap: 18px;
-  align-items: start;
+  height: 100%;
+  min-height: 0;
+  align-items: stretch;
 }
 
 .worktrail-rail {
-  position: sticky;
-  top: 0;
-  max-height: calc(100dvh - 178px);
+  position: relative;
+  height: 100%;
+  min-height: 0;
+  max-height: none;
   overflow: auto;
+  overscroll-behavior: contain;
   padding: 18px;
   border-radius: 26px;
 }
@@ -1687,17 +1813,19 @@ button {
 }
 
 .worktrail-board {
+  height: 100%;
   min-width: 0;
   overflow: auto;
+  overscroll-behavior: contain;
   border-radius: 26px;
   padding: 18px 18px 20px;
 }
 
 .worktrail-board-inner {
   display: grid;
-  grid-template-columns: 68px minmax(1060px, 1fr);
+  grid-template-columns: 62px minmax(748px, 1fr);
   gap: 12px;
-  min-width: 1140px;
+  min-width: 822px;
 }
 
 .worktrail-time-axis {
@@ -1917,6 +2045,8 @@ button {
 }
 
 .worktrail-time-block.interactive {
+  container-name: schedule-block;
+  container-type: size;
   cursor: grab;
   touch-action: none;
   will-change: top, height, transform;
@@ -2009,6 +2139,7 @@ button {
   min-height: 100%;
   flex-direction: column;
   align-items: flex-start;
+  overflow: hidden;
   border: 0;
   background: transparent;
   color: inherit;
@@ -2028,6 +2159,54 @@ button {
   line-height: 1.15;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.worktrail-block-body strong {
+  display: -webkit-box;
+  flex: 0 0 auto;
+  overflow: hidden;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  line-height: 1.22;
+  text-overflow: clip;
+  white-space: normal;
+}
+
+.worktrail-time-row {
+  display: flex;
+  width: 100%;
+  min-width: 0;
+  align-items: center;
+  gap: 5px;
+  margin-top: 5px;
+  color: color-mix(in srgb, var(--block-color, #007aff) 44%, rgb(var(--muted)));
+  font-size: 0.64rem;
+  font-variant-numeric: tabular-nums;
+  font-weight: 680;
+  line-height: 1.1;
+  white-space: nowrap;
+}
+
+.worktrail-time-range {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.worktrail-block-body .worktrail-duration {
+  position: static;
+  display: inline-flex;
+  min-width: 0;
+  height: auto;
+  flex: 0 0 auto;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--block-color, #007aff) 11%, white);
+  color: color-mix(in srgb, var(--block-color, #007aff) 58%, rgb(var(--ink)));
+  padding: 2px 5px;
+  font-size: 0.6rem;
+  font-weight: 800;
 }
 
 .worktrail-resize-handle {
@@ -2064,10 +2243,55 @@ button {
   min-width: 0;
   align-items: center;
   gap: 6px;
-  margin-top: 5px;
+  margin-top: 4px;
   color: rgb(var(--muted));
   font-size: 0.66rem;
   line-height: 1.15;
+}
+
+@container schedule-block (max-width: 138px) {
+  .worktrail-type-row,
+  .worktrail-block-body .worktrail-duration {
+    display: none;
+  }
+}
+
+@container schedule-block (max-width: 60px) {
+  .worktrail-block-body strong {
+    -webkit-line-clamp: 1;
+    white-space: nowrap;
+  }
+
+  .worktrail-time-end {
+    display: none;
+  }
+}
+
+@container schedule-block (max-height: 62px) {
+  .worktrail-block-body strong {
+    -webkit-line-clamp: 1;
+    white-space: nowrap;
+  }
+
+  .worktrail-type-row {
+    display: none;
+  }
+
+  .worktrail-time-row {
+    margin-top: 3px;
+  }
+}
+
+@container schedule-block (max-height: 42px) {
+  .worktrail-block-body strong,
+  .worktrail-block-body .worktrail-duration,
+  .worktrail-time-end {
+    display: none;
+  }
+
+  .worktrail-time-row {
+    margin-top: 0;
+  }
 }
 
 .worktrail-type-row span:last-child {
@@ -2368,13 +2592,200 @@ button {
   border: 3px solid rgb(var(--panel));
 }
 
+@media (max-width: 1720px) {
+  .worktrail-week-layout {
+    grid-template-columns: 270px minmax(0, 1fr);
+    gap: 14px;
+  }
+
+  .worktrail-palette-card {
+    min-height: 120px;
+    padding: 15px 15px 14px;
+  }
+
+  .worktrail-quick-card {
+    min-height: 78px;
+    padding: 15px;
+  }
+}
+
+@media (max-width: 1360px) {
+  .app-grid {
+    grid-template-columns: 136px minmax(0, 1fr);
+    gap: 12px;
+    padding: 12px;
+  }
+
+  .sidebar-shell {
+    top: 12px;
+    height: calc(100dvh - 24px);
+  }
+
+  .workspace-shell {
+    height: calc(100dvh - 24px);
+    border-radius: 28px;
+  }
+
+  .main-toolbar {
+    padding: 0 16px;
+  }
+
+  .titlebar-leading {
+    min-width: 96px;
+    flex-basis: 96px;
+  }
+
+  .schedule-title-toolbar {
+    padding-left: 108px;
+  }
+
+  .main-stage {
+    padding: 18px 18px 22px;
+  }
+
+  .toolbar-month-chip,
+  .toolbar-soft-button,
+  .toolbar-danger-button,
+  .toolbar-segmented button,
+  .toolbar-icon-button {
+    min-height: 34px;
+    font-size: 0.82rem;
+  }
+
+  .toolbar-month-chip,
+  .toolbar-soft-button,
+  .toolbar-danger-button,
+  .toolbar-segmented button {
+    padding-right: 14px;
+    padding-left: 14px;
+  }
+
+  .toolbar-icon-button {
+    width: 34px;
+  }
+
+  .toolbar-date-nav input {
+    width: 142px;
+    height: 34px;
+    min-height: 34px;
+    font-size: 0.82rem;
+  }
+
+  .worktrail-week-layout {
+    grid-template-columns: 240px minmax(0, 1fr);
+  }
+
+  .worktrail-rail,
+  .worktrail-board {
+    border-radius: 22px;
+    padding: 14px;
+  }
+
+  .worktrail-board-inner {
+    grid-template-columns: 54px minmax(654px, 1fr);
+    gap: 10px;
+    min-width: 718px;
+  }
+
+  .worktrail-day-columns {
+    gap: 8px;
+  }
+
+  .worktrail-day-header,
+  .worktrail-week-select-all {
+    border-radius: 15px;
+  }
+
+  .worktrail-day-header strong {
+    font-size: 0.82rem;
+  }
+
+  .worktrail-day-body {
+    border-radius: 16px;
+  }
+
+  .worktrail-time-block,
+  .worktrail-drop-preview,
+  .worktrail-create-preview,
+  .worktrail-move-preview {
+    right: 4px;
+    left: 4px;
+    border-radius: 12px;
+    padding-right: 7px;
+    padding-left: 12px;
+  }
+}
+
+@media (max-width: 1100px) {
+  .toolbar-month-chip,
+  .schedule-compact-actions {
+    display: none;
+  }
+
+  .schedule-more-menu {
+    display: block;
+  }
+
+  .schedule-title-toolbar {
+    grid-template-columns: auto minmax(210px, 1fr) auto;
+  }
+
+  .worktrail-week-layout {
+    grid-template-columns: 210px minmax(0, 1fr);
+    gap: 12px;
+  }
+
+  .worktrail-rail {
+    padding: 12px;
+  }
+
+  .worktrail-palette-card {
+    padding: 13px 12px 12px;
+  }
+
+  .worktrail-card-head {
+    gap: 8px;
+  }
+
+  .worktrail-board-inner {
+    grid-template-columns: 46px minmax(498px, 1fr);
+    gap: 8px;
+    min-width: 552px;
+  }
+
+  .worktrail-day-columns {
+    gap: 6px;
+  }
+
+  .worktrail-time-label {
+    right: 4px;
+    font-size: 0.7rem;
+  }
+
+  .worktrail-day-header strong {
+    font-size: 0.74rem;
+  }
+
+  .worktrail-time-block strong,
+  .worktrail-drop-preview strong,
+  .worktrail-create-preview strong,
+  .worktrail-move-preview strong {
+    font-size: 0.7rem;
+  }
+}
+
 @media (max-width: 900px) {
   .app-grid {
     grid-template-columns: 1fr;
     padding: 0;
   }
 
+  .sidebar-shell {
+    display: none !important;
+  }
+
   .workspace-shell {
+    height: 100dvh;
     min-height: 100dvh;
     border-radius: 0;
     border-left: 0;
@@ -2385,6 +2796,11 @@ button {
     height: 60px;
     min-height: 60px;
     padding: 0 16px;
+  }
+
+  .main-toolbar:has(.schedule-title-toolbar) {
+    height: 60px;
+    min-height: 60px;
   }
 
   .titlebar-inner {
@@ -2400,17 +2816,32 @@ button {
     overflow-x: auto;
   }
 
+  .schedule-title-toolbar {
+    padding: 0 0 0 86px;
+  }
+
   .main-stage {
     padding: 18px 16px 28px;
   }
 
+  .main-stage:has(> .worktrail-week-layout) {
+    overflow: auto;
+  }
+
   .worktrail-week-layout {
     grid-template-columns: 1fr;
+    height: auto;
   }
 
   .worktrail-rail {
     position: relative;
+    height: auto;
     max-height: none;
+  }
+
+  .worktrail-board {
+    height: auto;
+    min-height: 640px;
   }
 
   .worktrail-board-inner {
@@ -2447,5 +2878,38 @@ button {
 
   .guide-docs-content {
     padding: 24px 20px 32px;
+  }
+}
+
+@media (max-width: 640px) {
+  .schedule-title-toolbar {
+    grid-template-columns: auto minmax(176px, 1fr) auto;
+  }
+
+  .schedule-toolbar-left,
+  .schedule-toolbar-right {
+    gap: 6px;
+  }
+
+  .schedule-toolbar-right {
+    max-width: 100%;
+    overflow: visible;
+    justify-self: end;
+  }
+
+  .schedule-toolbar-right > .toolbar-soft-button,
+  .schedule-delete-button {
+    display: none;
+  }
+
+  .toolbar-soft-button,
+  .toolbar-danger-button,
+  .toolbar-segmented button {
+    padding-right: 11px;
+    padding-left: 11px;
+  }
+
+  .toolbar-date-nav input {
+    width: 126px;
   }
 }

@@ -5,7 +5,9 @@ import {
   Check,
   ChevronLeft,
   ChevronRight,
+  ClipboardPaste,
   Clock3,
+  Copy,
   Download,
   FileDown,
   FileUp,
@@ -13,6 +15,7 @@ import {
   FolderKanban,
   LayoutDashboard,
   Loader2,
+  MoreHorizontal,
   Moon,
   Pencil,
   Plus,
@@ -20,6 +23,7 @@ import {
   Sun,
   Table2,
   Trash2,
+  Undo2,
   Upload,
   Wand2,
   X,
@@ -865,13 +869,27 @@ function ScheduleTitleToolbar({
         <button className="toolbar-icon-button" onClick={() => onDateChange(shiftDate(selectedDate, mode === "week" ? 7 : 1))} aria-label={mode === "week" ? "下一周" : "下一天"}><ChevronRight className="size-4" /></button>
       </div>
       <div className="schedule-toolbar-right">
-        <button className="toolbar-soft-button" disabled={!canUndo} onClick={onUndo}>撤销</button>
-        <button className="toolbar-soft-button" disabled={!canCopy} title={copyTitle} onClick={onCopy}>复制</button>
-        <button className="toolbar-soft-button" disabled={!canPaste} title={pasteTitle} onClick={onPaste}>粘贴</button>
-        {clipboardSummary ? <span className="toolbar-copy-status">{clipboardSummary}</span> : null}
+        <div className="schedule-compact-actions" role="group" aria-label="编辑日程">
+          <button className="toolbar-icon-button" disabled={!canUndo} title="撤销" aria-label="撤销" onClick={onUndo}><Undo2 className="size-4" /></button>
+          <button className="toolbar-icon-button" disabled={!canCopy} title={copyTitle} aria-label={copyTitle} onClick={onCopy}><Copy className="size-4" /></button>
+          <button className="toolbar-icon-button" disabled={!canPaste} title={pasteTitle} aria-label={pasteTitle} onClick={onPaste}><ClipboardPaste className="size-4" /></button>
+        </div>
+        <details className="schedule-more-menu">
+          <summary className="toolbar-icon-button schedule-more-trigger" aria-label="更多日程操作" title="更多日程操作"><MoreHorizontal className="size-4" /></summary>
+          <div className="schedule-more-popover">
+            <button disabled={!canUndo} onClick={(event) => { onUndo(); event.currentTarget.closest("details")?.removeAttribute("open"); }}><Undo2 className="size-4" />撤销</button>
+            <button disabled={!canCopy} title={copyTitle} onClick={(event) => { onCopy(); event.currentTarget.closest("details")?.removeAttribute("open"); }}><Copy className="size-4" />复制</button>
+            <button disabled={!canPaste} title={pasteTitle} onClick={(event) => { onPaste(); event.currentTarget.closest("details")?.removeAttribute("open"); }}><ClipboardPaste className="size-4" />粘贴</button>
+            {clipboardSummary ? <span className="schedule-more-status">{clipboardSummary}</span> : null}
+            <span className="schedule-more-divider" />
+            <button title={`已选 ${selectedCount} 天`} onClick={(event) => { onGenerateSelected(); event.currentTarget.closest("details")?.removeAttribute("open"); }}><Wand2 className="size-4" />补全选中</button>
+            <button onClick={(event) => { onDateChange(new Date().toISOString().slice(0, 10)); event.currentTarget.closest("details")?.removeAttribute("open"); }}><CalendarDays className="size-4" />回到本周</button>
+            <button className="danger" disabled={!canDelete} title={deleteTitle} onClick={(event) => { onDeleteSelected(); event.currentTarget.closest("details")?.removeAttribute("open"); }}><Trash2 className="size-4" />删除选中</button>
+          </div>
+        </details>
         <button className="toolbar-soft-button" title={`已选 ${selectedCount} 天`} onClick={onGenerateSelected}>补全选中</button>
         <button className="toolbar-soft-button" onClick={() => onDateChange(new Date().toISOString().slice(0, 10))}>回到本周</button>
-        <button className="toolbar-danger-button" disabled={!canDelete} title={deleteTitle} onClick={onDeleteSelected}>删除选中</button>
+        <button className="toolbar-danger-button schedule-delete-button" disabled={!canDelete} title={deleteTitle} aria-label={deleteTitle} onClick={onDeleteSelected}><Trash2 className="size-4" /><span>删除选中</span></button>
       </div>
     </div>
   );
@@ -1817,6 +1835,7 @@ function WeekSchedule({
                           <button
                             type="button"
                             className="worktrail-block-body"
+                            title={`${rendered.projectName && rendered.projectName !== "备注" ? rendered.projectName : rendered.remark || rendered.workCategory} · ${formatNatureForm(rendered.workNature, rendered.workForm)} · ${rendered.startTime}–${rendered.endTime} · ${durationHours(rendered.startTime, rendered.endTime).toFixed(1)}h`}
                             onPointerDown={(event) => {
                               event.stopPropagation();
                               const body = event.currentTarget.closest<HTMLElement>("[data-week-day-body='true']");
@@ -1837,9 +1856,11 @@ function WeekSchedule({
                             }}
                           >
                             <strong>{rendered.projectName && rendered.projectName !== "备注" ? rendered.projectName : rendered.remark || rendered.workCategory}</strong>
+                            <div className="worktrail-time-row">
+                              <span className="worktrail-time-range"><span>{rendered.startTime}</span><span className="worktrail-time-end">–{rendered.endTime}</span></span>
+                              <span className="worktrail-duration">{durationHours(rendered.startTime, rendered.endTime).toFixed(1)}h</span>
+                            </div>
                             <div className="worktrail-type-row"><span className="worktrail-type-dot" /><span>{formatNatureForm(rendered.workNature, rendered.workForm)}</span></div>
-                            <span>{rendered.startTime} - {rendered.endTime}</span>
-                            <span className="worktrail-duration">{durationHours(rendered.startTime, rendered.endTime).toFixed(1)}</span>
                           </button>
                           <button
                             type="button"
