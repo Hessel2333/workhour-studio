@@ -29,10 +29,17 @@ type CompletedUpdate = {
 const isTauriRuntime = () => typeof window !== "undefined" && "__TAURI_INTERNALS__" in window;
 
 function normalizeNotes(body?: string) {
-  const notes = (body || "")
+  const lines = (body || "")
     .split(/\r?\n/)
-    .map((line) => line.trim().replace(/^[-*]\s+/, ""))
+    .map((line) => line.trim())
     .filter(Boolean);
+  const listItems = lines
+    .filter((line) => /^[-*]\s+/.test(line))
+    .map((line) => line.replace(/^[-*]\s+/, ""));
+  const notes = listItems.length
+    ? listItems
+    : lines.filter((line) => !/^#{1,6}\s+/.test(line));
+
   return notes.length ? notes.slice(0, 10) : ["本次更新包含功能改进与稳定性优化。"];
 }
 

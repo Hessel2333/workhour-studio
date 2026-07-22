@@ -56,6 +56,22 @@ jobs:
       - name: Validate frontend
         run: npm run check
 
+      - name: Load release notes
+        id: release_notes
+        shell: pwsh
+        run: |
+          $version = (Get-Content package.json -Raw | ConvertFrom-Json).version
+          $notesPath = "release-notes/app-v$version.md"
+
+          if (-not (Test-Path $notesPath)) {
+            throw "Missing release notes: $notesPath"
+          }
+
+          $delimiter = "RELEASE_NOTES_$([guid]::NewGuid().ToString('N'))"
+          "body<<$delimiter" | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          Get-Content $notesPath -Raw | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+          $delimiter | Out-File -FilePath $env:GITHUB_OUTPUT -Encoding utf8 -Append
+
       - name: Build and publish release
         uses: tauri-apps/tauri-action@v1
         env:
@@ -66,14 +82,7 @@ jobs:
         with:
           tagName: app-v__VERSION__
           releaseName: Workhour Studio v__VERSION__
-          releaseBody: |
-            Workhour Studio 桌面版。
-
-            - Windows：下载 `setup.exe`
-            - Apple Silicon Mac：下载 `aarch64.dmg`
-            - Intel Mac：下载 `x64.dmg`
-
-            首次启动会自动创建本地数据库，也可以从旧 Excel 文件导入数据。
+          releaseBody: ${{ steps.release_notes.outputs.body }}
           releaseDraft: true
           prerelease: false
           updaterJsonPreferNsis: true
