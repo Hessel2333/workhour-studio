@@ -1828,6 +1828,11 @@ button {
   min-width: 822px;
 }
 
+.worktrail-week-layout.day-mode .worktrail-board-inner {
+  grid-template-columns: 62px minmax(520px, 1fr);
+  min-width: 594px;
+}
+
 .worktrail-time-axis {
   position: relative;
   user-select: none;
@@ -1878,6 +1883,10 @@ button {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));
   gap: 12px;
+}
+
+.worktrail-week-layout.day-mode .worktrail-day-columns {
+  grid-template-columns: minmax(0, 1fr);
 }
 
 .worktrail-day-column {
@@ -2282,10 +2291,9 @@ button {
   }
 }
 
-@container schedule-block (max-height: 42px) {
+@container schedule-block (max-height: 24px) {
   .worktrail-block-body strong,
-  .worktrail-block-body .worktrail-duration,
-  .worktrail-time-end {
+  .worktrail-block-body .worktrail-duration {
     display: none;
   }
 
@@ -2882,6 +2890,34 @@ button {
 }
 
 @media (max-width: 640px) {
+  .main-toolbar:has(.template-titlebar-actions) {
+    height: 108px;
+    min-height: 108px;
+  }
+
+  .titlebar-inner:has(.template-titlebar-actions) .titlebar-leading {
+    display: none;
+  }
+
+  .template-titlebar-actions {
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+  }
+
+  .template-title-tabs,
+  .template-month-nav {
+    position: static;
+    width: auto;
+    transform: none;
+  }
+
+  .template-title-tabs {
+    width: 100%;
+  }
+
   .schedule-title-toolbar {
     grid-template-columns: auto minmax(176px, 1fr) auto;
   }

@@ -1,6 +1,6 @@
 import { createId } from "../data/defaults";
 import type { Profile, TimesheetEntry, WorkTemplate } from "../data/types";
-import { dateForMonthDay, daysInMonth, fromMinutes, getWeekday, overlaps, toMinutes } from "../lib/time";
+import { dateForMonthDay, daysInMonth, fromMinutes, getWeekday, toMinutes } from "../lib/time";
 
 const now = () => new Date().toISOString();
 const STEP_MINUTES = 30;
@@ -17,16 +17,27 @@ const seededFraction = (seed: string) => {
   return ((hash >>> 0) % 1_000_000) / 1_000_000;
 };
 
-const pickWeighted = (templates: WorkTemplate[], seed: number) => {
-  const effectiveWeight = (template: WorkTemplate) => Math.min(20, Math.max(template.weight, 1));
-  const total = templates.reduce((sum, template) => sum + effectiveWeight(template), 0);
-  let cursor = (seed * 9301 + 49297) % 233280;
-  let target = (cursor / 233280) * total;
-  for (const template of templates) {
-    target -= effectiveWeight(template);
-    if (target <= 0) return template;
-  }
-  return templates[0];
+const createWeightedPicker = (templates: WorkTemplate[], seed: string) => {
+  const candidates = templates.map((template) => ({
+    template,
+    weight: Math.min(20, Math.max(Number.isFinite(template.weight) ? template.weight : 1, 1)),
+    credit: 0,
+    tie: seededFraction(`${seed}/${template.id}`),
+  }));
+  const total = candidates.reduce((sum, item) => sum + item.weight, 0);
+  // Smooth weighted allocation: equal weights take turns; larger weights get
+  // proportionally more slots without repeatedly starving smaller templates.
+  return () => {
+    let chosen = candidates[0];
+    for (const candidate of candidates) {
+      candidate.credit += candidate.weight;
+    }
+    for (const candidate of candidates) {
+      if (candidate.credit > chosen.credit || (candidate.credit === chosen.credit && candidate.tie > chosen.tie)) chosen = candidate;
+    }
+    chosen.credit -= total;
+    return chosen.template;
+  };
 };
 
 const pickRemark = (template: WorkTemplate, seed: string) => {
@@ -57,22 +68,17 @@ const entryFromTemplate = (date: string, startTime: string, endTime: string, tem
 
 const findFreeRanges = (startMinute: number, endMinute: number, occupied: TimesheetEntry[], profile: Profile, skipLunch: boolean) => {
   const ranges: Array<{ start: number; end: number }> = [];
-  let rangeStart: number | null = null;
-
-  for (let minute = startMinute; minute < endMinute; minute += STEP_MINUTES) {
-    const slotStart = fromMinutes(minute);
-    const slotEnd = fromMinutes(minute + STEP_MINUTES);
-    const blockedByLunch = skipLunch && overlaps(slotStart, slotEnd, profile.lunchStart, profile.lunchEnd);
-    const blockedByEntry = occupied.some((entry) => overlaps(slotStart, slotEnd, entry.startTime, entry.endTime));
-    const isFree = !blockedByLunch && !blockedByEntry;
-
-    if (isFree && rangeStart === null) rangeStart = minute;
-    if ((!isFree || minute + STEP_MINUTES >= endMinute) && rangeStart !== null) {
-      const rangeEnd = isFree && minute + STEP_MINUTES >= endMinute ? minute + STEP_MINUTES : minute;
-      if (rangeEnd > rangeStart) ranges.push({ start: rangeStart, end: rangeEnd });
-      rangeStart = null;
-    }
+  const blocked = occupied.map((entry) => ({ start: toMinutes(entry.startTime), end: toMinutes(entry.endTime) }));
+  if (skipLunch) blocked.push({ start: toMinutes(profile.lunchStart), end: toMinutes(profile.lunchEnd) });
+  blocked.sort((a, b) => a.start - b.start);
+  let cursor = startMinute;
+  for (const interval of blocked) {
+    if (interval.end <= cursor || interval.start >= endMinute || interval.end <= interval.start) continue;
+    if (interval.start > cursor) ranges.push({ start: cursor, end: Math.min(interval.start, endMinute) });
+    cursor = Math.max(cursor, interval.end);
+    if (cursor >= endMinute) break;
   }
+  if (cursor < endMinute) ranges.push({ start: cursor, end: endMinute });
 
   return ranges;
 };
@@ -80,6 +86,7 @@ const findFreeRanges = (startMinute: number, endMinute: number, occupied: Timesh
 const collectBlockPatterns = (totalMinutes: number) => {
   const patterns: number[][] = [];
   const walk = (remaining: number, pattern: number[]) => {
+    if (patterns.length >= 2048) return;
     if (remaining === 0) {
       patterns.push(pattern);
       return;
@@ -125,7 +132,16 @@ const chooseBlockPattern = (patterns: number[][], seed: string) => {
 
 const splitRandomRange = (start: number, end: number, seed: string) => {
   const totalMinutes = end - start;
-  const pattern = chooseBlockPattern(collectBlockPatterns(totalMinutes), seed);
+  if (totalMinutes <= 0) return [];
+  if (totalMinutes < MIN_RANDOM_BLOCK) return [{ start, end }];
+  const rounded = Math.floor(totalMinutes / STEP_MINUTES) * STEP_MINUTES;
+  const pattern = chooseBlockPattern(collectBlockPatterns(rounded), seed);
+  const remainder = totalMinutes - rounded;
+  if (remainder) {
+    const last = pattern.length - 1;
+    if (pattern[last] + remainder <= MAX_RANDOM_BLOCK) pattern[last] += remainder;
+    else pattern.push(remainder);
+  }
   let cursor = start;
 
   return pattern.map((size) => {
@@ -135,52 +151,45 @@ const splitRandomRange = (start: number, end: number, seed: string) => {
   });
 };
 
-export function generateAutofillEntries(month: string, profile: Profile, templates: WorkTemplate[], entries: TimesheetEntry[], seedSalt = 0) {
-  const randomTemplates = templates.filter((template) => template.enabled && template.scheduleKind === "random");
-  const fixedTemplates = templates.filter((template) => template.enabled && template.scheduleKind !== "random");
+export function generateAutofillEntries(month: string, profile: Profile, templates: WorkTemplate[], entries: TimesheetEntry[], seedSalt = 0, selectedDates?: ReadonlySet<string>) {
+  const randomTemplates = templates.filter((template) => template.enabled && !template.archived && template.scheduleKind === "random");
+  const fixedTemplates = templates.filter((template) => template.enabled && !template.archived && template.scheduleKind !== "random");
   if (randomTemplates.length === 0 && fixedTemplates.length === 0) return [];
+  const pickWeighted = createWeightedPicker(randomTemplates, `${month}/${seedSalt}`);
 
   const generatedEntries: TimesheetEntry[] = [];
   for (let day = 1; day <= daysInMonth(month); day += 1) {
     const workDate = dateForMonthDay(month, day);
+    if (selectedDates && !selectedDates.has(workDate)) continue;
     const weekday = getWeekday(workDate);
     const dayEntries = entries.filter((entry) => entry.workDate === workDate);
     const isWeekend = weekday >= 6;
-    const weekendTemplate = fixedTemplates.find((template) => template.scheduleKind === "weekend_lecture" && weekday === 6);
-    const dayStart = isWeekend && weekendTemplate ? weekendTemplate.startTime || "09:00" : profile.defaultStart;
-    const dayEnd = isWeekend && weekendTemplate ? weekendTemplate.endTime || "11:30" : profile.defaultEnd;
-
-    if (weekendTemplate && isWeekend) {
-      findFreeRanges(toMinutes(dayStart), toMinutes(dayEnd), dayEntries, profile, false).forEach((range) => {
-        generatedEntries.push(entryFromTemplate(workDate, fromMinutes(range.start), fromMinutes(range.end), weekendTemplate, seedSalt));
-      });
-      continue;
-    }
-
-    if (isWeekend) continue;
-
+    const dayStart = profile.defaultStart;
+    const dayEnd = profile.defaultEnd;
     const fixedForDay = fixedTemplates.filter(
-      (template) => template.scheduleKind === "fixed" && template.weekday === weekday && template.startTime && template.endTime,
+      (template) => (template.scheduleKind === "fixed" ? template.weekday === weekday : (template.weekday ?? 6) === weekday)
+        && template.startTime && template.endTime,
     );
 
     fixedForDay.forEach((template) => {
-      const start = Math.max(toMinutes(dayStart), toMinutes(template.startTime || dayStart));
-      const end = Math.min(toMinutes(dayEnd), toMinutes(template.endTime || dayEnd));
+      const start = isWeekend ? toMinutes(template.startTime!) : Math.max(toMinutes(dayStart), toMinutes(template.startTime!));
+      const end = isWeekend ? toMinutes(template.endTime!) : Math.min(toMinutes(dayEnd), toMinutes(template.endTime!));
       if (end <= start) return;
-      findFreeRanges(start, end, dayEntries, profile, true).forEach((range) => {
+      const occupied = [...dayEntries, ...generatedEntries.filter((entry) => entry.workDate === workDate)];
+      findFreeRanges(start, end, occupied, profile, template.scheduleKind !== "weekend_lecture").forEach((range) => {
         generatedEntries.push(entryFromTemplate(workDate, fromMinutes(range.start), fromMinutes(range.end), template, seedSalt));
       });
     });
 
     const occupiedWithFixed = [...dayEntries, ...generatedEntries.filter((entry) => entry.workDate === workDate)];
-    if (randomTemplates.length === 0) continue;
+    if (isWeekend || randomTemplates.length === 0) continue;
     findFreeRanges(toMinutes(dayStart), toMinutes(dayEnd), occupiedWithFixed, profile, true).forEach((range) => {
-      splitRandomRange(range.start, range.end, `${workDate}-${range.start}-${range.end}-${seedSalt}`).forEach((block, index) => {
-        const template = pickWeighted(randomTemplates, seedSalt + day * 1000 + block.start + index);
+      splitRandomRange(range.start, range.end, `${workDate}-${range.start}-${range.end}-${seedSalt}`).forEach((block) => {
+        const template = pickWeighted();
         generatedEntries.push(entryFromTemplate(workDate, fromMinutes(block.start), fromMinutes(block.end), template, seedSalt));
       });
     });
   }
 
-  return generatedEntries.map((entry) => ({ ...entry, id: createId("entry") }));
+  return generatedEntries;
 }

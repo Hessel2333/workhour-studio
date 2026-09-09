@@ -1,5 +1,5 @@
 import { Clock3, Database, Wand2 } from "lucide-react";
-import { CategoryChart } from "../components/Chart";
+import { CategoryChart } from "../components/LazyCharts";
 import { Badge } from "../components/ui/Badge";
 import { Button } from "../components/ui/Button";
 import { Card, CardHeader } from "../components/ui/Card";

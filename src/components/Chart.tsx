@@ -1,7 +1,12 @@
-import * as echarts from "echarts";
+import * as echarts from "echarts/core";
+import { BarChart, PieChart } from "echarts/charts";
+import { GridComponent, TooltipComponent, LegendComponent } from "echarts/components";
+import { CanvasRenderer } from "echarts/renderers";
 import { useEffect, useRef } from "react";
 import type { TimesheetEntry, WorkTemplate } from "../data/types";
 import { durationHours } from "../lib/time";
+
+echarts.use([BarChart, PieChart, GridComponent, TooltipComponent, LegendComponent, CanvasRenderer]);
 
 const chartPalette = ["#007aff", "#ff9500", "#af52de", "#5856d6", "#ff2d55", "#64d2ff", "#8e8e93", "#bf5af2"];
 const splitLineColor = "rgba(142, 142, 147, 0.18)";

@@ -54,7 +54,13 @@ jobs:
         run: npm ci
 
       - name: Validate frontend
-        run: npm run check
+        run: npm run build
+
+      - name: Run regression tests
+        run: npm test
+
+      - name: Validate database transactions
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib --locked
 
       - name: Load release notes
         id: release_notes

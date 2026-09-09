@@ -1,5 +1,6 @@
 import { createId } from "../data/defaults";
 import type { ImportExportJob, TemplatePreset, WorkspaceState } from "../data/types";
+import { validateWorkspace } from "../data/validateWorkspace";
 
 const now = () => new Date().toISOString();
 const backupFormat = "workhour-studio.workspace";
@@ -53,21 +54,9 @@ export function exportWorkspaceJson(state: WorkspaceState): ImportExportJob {
 
 export async function importWorkspaceBackupJson(file: File) {
   const raw = JSON.parse(await file.text()) as unknown;
-  if (!isRecord(raw) || raw.format !== backupFormat || !isRecord(raw.data)) return null;
-  const data = raw.data as Partial<WorkspaceState>;
-  if (!isRecord(data.profile)) throw new Error("数据文件缺少基础设置");
-
-  const workspace: WorkspaceState = {
-    profile: data.profile as WorkspaceState["profile"],
-    projects: Array.isArray(data.projects) ? data.projects as WorkspaceState["projects"] : [],
-    aliases: Array.isArray(data.aliases) ? data.aliases as WorkspaceState["aliases"] : [],
-    templates: Array.isArray(data.templates) ? data.templates as WorkspaceState["templates"] : [],
-    monthlyTemplateSettings: Array.isArray(data.monthlyTemplateSettings) ? data.monthlyTemplateSettings as WorkspaceState["monthlyTemplateSettings"] : [],
-    templatePresets: Array.isArray(data.templatePresets) ? data.templatePresets as WorkspaceState["templatePresets"] : [],
-    blocks: Array.isArray(data.blocks) ? data.blocks as WorkspaceState["blocks"] : [],
-    entries: Array.isArray(data.entries) ? data.entries as WorkspaceState["entries"] : [],
-    jobs: Array.isArray(data.jobs) ? data.jobs as WorkspaceState["jobs"] : [],
-  };
+  if (!isRecord(raw) || raw.format !== backupFormat) return null;
+  if (raw.version !== backupVersion) throw new Error("不支持此数据备份版本，未覆盖本地数据。");
+  const workspace = validateWorkspace(raw.data);
   const job: ImportExportJob = {
     id: createId("job"),
     kind: "json_import",

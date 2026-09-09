@@ -1,7 +1,9 @@
+import { mergeContinuousEntries } from "./entries";
+export { mergeContinuousEntries } from "./entries";
 import * as XLSX from "xlsx";
 import { createId } from "../data/defaults";
 import type { ImportExportJob, ImportResult, Profile, Project, TimesheetEntry, WorkTemplate } from "../data/types";
-import { dateForMonthDay, durationHours, fromMinutes, sameEntryBody, toMinutes } from "../lib/time";
+import { dateForMonthDay, durationHours, fromMinutes, toMinutes } from "../lib/time";
 
 type RawRow = Record<string, unknown>;
 type ExportCell = string | number | null;
@@ -63,24 +65,6 @@ const columnMap = (header: unknown[]) => {
     if (value === "共同完成人") map.collaborator = index;
   });
   return map;
-};
-
-const isSameEntry = (a: TimesheetEntry, b: TimesheetEntry) =>
-  a.workDate === b.workDate && sameEntryBody(a, b) && a.source === b.source && a.status === b.status;
-
-export const mergeContinuousEntries = (entries: TimesheetEntry[]) => {
-  const sorted = [...entries].sort((a, b) => `${a.workDate} ${a.startTime}`.localeCompare(`${b.workDate} ${b.startTime}`));
-  const merged: TimesheetEntry[] = [];
-  for (const entry of sorted) {
-    const last = merged[merged.length - 1];
-    if (last && isSameEntry(last, entry) && last.endTime === entry.startTime) {
-      last.endTime = entry.endTime;
-      last.updatedAt = now();
-    } else {
-      merged.push({ ...entry });
-    }
-  }
-  return merged;
 };
 
 const findSheetRows = (workbook: XLSX.WorkBook, names: string[]) => {
