@@ -30,7 +30,7 @@ import {
 } from "lucide-react";
 import { lazy, Suspense, type ChangeEvent, type DragEvent, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
-import { TemplateWeightChart } from "./components/Chart";
+import { TemplateWeightChart } from "./components/LazyCharts";
 import { Badge } from "./components/ui/Badge";
 import { Button } from "./components/ui/Button";
 import { Card, CardHeader } from "./components/ui/Card";
@@ -41,7 +41,7 @@ import { PageHeader } from "./components/ui/PageHeader";
 import { createId } from "./data/defaults";
 import type { MonthlyTemplateSetting, PageKey, Project, TemplatePreset, ThemeMode, TimesheetEntry, WorkTemplate, WorkspaceState } from "./data/types";
 import { generateAutofillEntries } from "./features/autofill";
-import { mergeContinuousEntries } from "./features/excel";
+import { mergeContinuousEntries } from "./features/entries";
 import { getEntryProjectColor, getNatureColor, projectColorPalette, stableIndex } from "./features/schedule/presentation";
 import {
   applyMonthSettings,
@@ -56,7 +56,7 @@ import {
   normalizeRemarkOptions,
   projectExists,
   requiresLinkedProject,
-  templateSignature,
+  templateScheduleError,
 } from "./features/templates/templateState";
 import { exportTemplatePresetJson, importTemplatePresetJson } from "./features/workspaceBackup";
 import { loadWorkspace, saveStatePatch } from "./lib/db";
@@ -207,29 +207,26 @@ function sanitizeWorkspaceData(workspace: WorkspaceState) {
       ownerScope: project.ownerScope === "other" ? "other" as const : "self" as const,
     };
   });
-  const normalizeProjectName = (projectName?: string) => projectExists(normalizedProjects, projectName) ? projectName : "备注";
   const normalizedEntries = workspace.entries
-    .filter((entry) => entry.workDate >= "2026-01-01")
     .map((entry) => ({
       ...entry,
       status: "confirmed" as const,
       workNature: normalizeWorkNatureValue(entry.workNature),
-      projectName: entry.source === "autofill" ? normalizeProjectName(entry.projectName) : entry.projectName,
+      projectName: entry.projectName,
     }));
   const normalizedTemplates = workspace.templates
     .map((template) => ({
       ...template,
       workNature: normalizeWorkNatureValue(template.workNature),
       remarkOptions: normalizeRemarkOptions(template),
-      projectName: normalizeProjectName(template.projectName),
-      projectId: projectExists(workspace.projects, template.projectName) ? template.projectId : undefined,
+      projectName: template.projectName,
+      projectId: template.projectId,
       weight: clampTemplateWeight(template.weight),
       enabled: Boolean(template.enabled),
       archived: Boolean(template.archived),
-    }))
-    .filter((template) => isTemplateAllowed(template, workspace.projects));
-  const normalizedBlocks = workspace.blocks.filter((block) => block.workDate >= "2026-01-01");
-  const normalizedJobs = workspace.jobs.filter((job) => !job.periodEnd || job.periodEnd >= "2026-01");
+    }));
+  const normalizedBlocks = workspace.blocks;
+  const normalizedJobs = workspace.jobs;
   const templateIds = new Set(normalizedTemplates.map((template) => template.id));
   const normalizedMonthlyTemplateSettings = (workspace.monthlyTemplateSettings || [])
     .filter((setting) => templateIds.has(setting.templateId))
@@ -302,6 +299,9 @@ function applyTheme(mode: ThemeMode) {
 function App() {
   const initialScheduleDate = new Date().toISOString().slice(0, 10);
   const [state, setState] = useState<WorkspaceState | null>(null);
+  const stateRef = useRef(state);
+  const saveQueue = useRef<Promise<unknown>>(Promise.resolve());
+  stateRef.current = state;
   const [page, setPage] = useState<PageKey>("dashboard");
   const [month, setMonth] = useState(monthKey(new Date()));
   const [scheduleMode, setScheduleMode] = useState<"day" | "week">("week");
@@ -347,11 +347,23 @@ function App() {
     return () => window.clearTimeout(timer);
   }, [notice, state]);
 
-  const save = async (patch: Partial<WorkspaceState>, message?: string) => {
-    if (!state) return;
-    const next = await saveStatePatch(patch, state);
-    setState(next);
-    if (message) setNotice(message);
+  const save = (patch: Partial<WorkspaceState>, message?: string): Promise<void> => {
+    const base = state;
+    const pending = saveQueue.current.then(async () => {
+      const latest = stateRef.current;
+      if (!base || !latest) throw new Error("工作区尚未加载");
+      for (const key of Object.keys(patch) as Array<keyof WorkspaceState>) {
+        if (JSON.stringify(base[key]) !== JSON.stringify(latest[key])) {
+          throw new Error("数据已被另一项操作更新，请重新操作，避免覆盖新修改。");
+        }
+      }
+      const next = await saveStatePatch(patch, latest);
+      stateRef.current = next;
+      setState(next);
+      if (message) setNotice(message);
+    });
+    saveQueue.current = pending.catch((error) => { setNotice(`保存失败：${String(error)}`); });
+    return pending;
   };
 
   const confirmAction = (request: ConfirmRequest) => setConfirmRequest(request);
@@ -618,7 +630,7 @@ function App() {
     const months = [...new Set([...dateSet].map((date) => date.slice(0, 7)))];
     const seedSalt = Date.now() % 1_000_000;
     const generatedEntries = months
-      .flatMap((item) => generateAutofillEntries(item, state.profile, getAutofillTemplates(state, item), state.entries, seedSalt))
+      .flatMap((item) => generateAutofillEntries(item, state.profile, getAutofillTemplates(state, item), state.entries, seedSalt, dateSet))
       .filter((entry) => dateSet.has(entry.workDate));
     if (!generatedEntries.length) {
       setNotice("选中日期没有可补全空档");
@@ -1072,70 +1084,33 @@ function SchedulePage({
   onToggleScheduleDate,
   onToggleScheduleWeekSelection,
 }: PageProps) {
-  const dayEntries = state.entries.filter((entry) => entry.workDate === selectedDate).sort((a, b) => a.startTime.localeCompare(b.startTime));
-  const slots = [];
-  for (let minute = toMinutes(state.profile.defaultStart); minute < toMinutes(state.profile.defaultEnd); minute += 30) {
-    const start = fromMinutes(minute);
-    const end = fromMinutes(minute + 30);
-    const entry = dayEntries.find((item) => overlaps(start, end, item.startTime, item.endTime));
-    slots.push({ start, end, entry });
-  }
-
   return (
     <>
       <PageHeader title="日程" description="按日或按周维护时间块，自动补全后可直接调整。" />
-      {mode === "week" ? (
-        <WeekSchedule
-          state={state}
-          selectedDate={selectedDate}
-          selectedDates={scheduleSelectedDates}
-          selectedEntryId={scheduleSelectedEntryId}
-          selectedSlot={scheduleSelectedSlot}
-          clipboard={scheduleClipboard}
-          onSelectDate={setSelectedDate}
-          onSelectEntry={selectScheduleEntry}
-          onSelectSlot={selectScheduleSlot}
-          onToggleDate={onToggleScheduleDate}
-          onToggleWeekSelection={onToggleScheduleWeekSelection}
-          save={save}
-          saveScheduleEntries={saveScheduleEntries}
-          setNotice={setNotice}
-          confirmAction={confirmAction}
-        />
-      ) : (
-        <div className="grid gap-5 xl:grid-cols-[280px_minmax(0,1fr)]">
-          <Card className="p-4">
-            <Field label="日期"><Input type="date" value={selectedDate} onChange={(event) => setSelectedDate(event.target.value)} /></Field>
-            <div className="mt-5 grid grid-cols-7 gap-1">
-              {Array.from({ length: daysInMonth(month) }, (_, index) => {
-                const date = dateForMonthDay(month, index + 1);
-                const hasEntry = state.entries.some((entry) => entry.workDate === date);
-                return <button key={date} onClick={() => setSelectedDate(date)} className={cn("h-9 rounded-lg border text-sm", selectedDate === date ? "border-accent bg-accent text-white" : hasEntry ? "border-blue-200 bg-blue-50 text-blue-700 dark:bg-blue-400/10" : "border-line/10 bg-white/30 text-muted dark:bg-white/5")}>{index + 1}</button>;
-              })}
-            </div>
-          </Card>
-          <Card>
-            <CardHeader title={`${selectedDate} 时间轴`} />
-            <div className="p-5">
-              <div className="grid gap-2">
-                {slots.map((slot) => (
-                  <div key={`${slot.start}-${slot.end}`} className="grid grid-cols-[90px_minmax(0,1fr)] items-stretch gap-3">
-                    <div className="pt-2 text-sm font-medium text-muted">{slot.start}</div>
-                    <div className={cn("rounded-2xl border px-3 py-2 text-sm", slot.entry ? "timeline-card border-white/50 dark:border-white/5" : "border-dashed border-line/20 bg-white/25 text-muted dark:bg-white/5")} style={{ ["--block-color" as string]: slot.entry ? getEntryProjectColor(slot.entry) : "#007aff" }}>
-                      {slot.entry ? <div className="flex flex-wrap items-center justify-between gap-2"><span className="font-medium text-ink">{slot.entry.remark || slot.entry.projectName || slot.entry.workCategory}</span><Badge tone="blue">记录</Badge></div> : "空白"}
-                    </div>
-                  </div>
-                ))}
-              </div>
-            </div>
-          </Card>
-        </div>
-      )}
+      <WeekSchedule
+        mode={mode}
+        state={state}
+        selectedDate={selectedDate}
+        selectedDates={scheduleSelectedDates}
+        selectedEntryId={scheduleSelectedEntryId}
+        selectedSlot={scheduleSelectedSlot}
+        clipboard={scheduleClipboard}
+        onSelectDate={setSelectedDate}
+        onSelectEntry={selectScheduleEntry}
+        onSelectSlot={selectScheduleSlot}
+        onToggleDate={onToggleScheduleDate}
+        onToggleWeekSelection={onToggleScheduleWeekSelection}
+        save={save}
+        saveScheduleEntries={saveScheduleEntries}
+        setNotice={setNotice}
+        confirmAction={confirmAction}
+      />
     </>
   );
 }
 
 function WeekSchedule({
+  mode,
   state,
   selectedDate,
   selectedDates,
@@ -1152,6 +1127,7 @@ function WeekSchedule({
   setNotice,
   confirmAction,
 }: {
+  mode: "day" | "week";
   state: WorkspaceState;
   selectedDate: string;
   selectedDates: string[];
@@ -1182,7 +1158,7 @@ function WeekSchedule({
   const [currentTime, setCurrentTime] = useState(() => new Date());
   const [editingFixedProject, setEditingFixedProject] = useState<Project | null>(null);
   const [isAddingFixedProject, setIsAddingFixedProject] = useState(false);
-  const weekDates = getWeekDates(selectedDate);
+  const weekDates = mode === "day" ? [selectedDate] : getWeekDates(selectedDate);
   const selectedDateSet = new Set(selectedDates);
   const isWeekSelected = weekDates.every((date) => selectedDateSet.has(date));
   const today = toIsoDate(currentTime);
@@ -1642,7 +1618,7 @@ function WeekSchedule({
   };
 
   return (
-    <div className="worktrail-week-layout">
+    <div className={cn("worktrail-week-layout", mode === "day" && "day-mode")}>
       <aside className="worktrail-rail panel-card">
         <div className="worktrail-rail-title with-action">
           <span>工作项</span>
@@ -1688,10 +1664,10 @@ function WeekSchedule({
             <button
               type="button"
               className={cn("worktrail-week-select-all", isWeekSelected && "selected")}
-              onClick={onToggleWeekSelection}
-              aria-label={isWeekSelected ? "取消全选本周" : "全选本周"}
-            >
-              {isWeekSelected ? "已全选" : "全选"}
+              onClick={() => mode === "day" ? onToggleDate(selectedDate) : onToggleWeekSelection()}
+                aria-label={mode === "day" ? "选中当天" : isWeekSelected ? "取消全选本周" : "全选本周"}
+              >
+                {mode === "day" ? "当天" : isWeekSelected ? "已全选" : "全选"}
             </button>
             {hourMarkers.map((minute) => <div key={minute} className="worktrail-time-label" style={{ top: weekHeaderOffset + ((minute - weekTimelineStart) / 30) * weekSlotHeight }}>{fromMinutes(minute)}</div>)}
           </div>
@@ -2265,6 +2241,8 @@ function TemplatesPage({ state, month, save, confirmAction }: PageProps) {
   const monthSettings = getMonthTemplateSettings(state, templateMonth);
   const monthTemplates = applyMonthSettings(state.templates, monthSettings);
   const commonTemplates = monthTemplates.filter(isCommonTemplate);
+  const eligibleTemplates = getAutofillTemplates(state, templateMonth);
+  const invalidProjectTemplates = commonTemplates.filter((template) => !isTemplateAllowed(template, state.projects));
   const visibleTemplates = templateView === "common" ? commonTemplates : monthTemplates;
   const templateGroups = groupTemplates(visibleTemplates, groupBy);
   const totalWeight = commonTemplates.reduce((sum, template) => sum + clampTemplateWeight(template.weight), 0);
@@ -2419,6 +2397,8 @@ function TemplatesPage({ state, month, save, confirmAction }: PageProps) {
     };
   };
   const validateTemplate = () => {
+    const scheduleError = templateScheduleError(draft);
+    if (scheduleError) { setFormError(scheduleError); return false; }
     if (projectRequired && (!draft.projectName || draft.projectName === "备注" || !projectExists(state.projects, draft.projectName))) {
       setFormError("这个工作类别必须选择项目库中的具体项目。");
       return false;
@@ -2656,6 +2636,11 @@ function TemplatesPage({ state, month, save, confirmAction }: PageProps) {
         }
       />
       <div className="template-page panel-card">
+        <div className="border-b border-line/10 px-5 py-3 text-sm text-muted" role="status">
+          {templateMonth} 可参与补全 {eligibleTemplates.length} 个模板，其中随机模板 {eligibleTemplates.filter((template) => template.scheduleKind === "random").length} 个。
+          <span className="block mt-1">仅使用补全月份的常用模板；固定模板按星期和时间生效。空档较少时，无法使用全部模板。随机模板按权重轮换，权重相同优先轮到不同模板。</span>
+          {invalidProjectTemplates.length > 0 && <span className="block mt-1 text-amber-600">以下模板需要重新关联项目：{invalidProjectTemplates.map((template) => template.name).join("、")}。</span>}
+        </div>
         {templateView === "common" ? (
           <>
             <div className="template-preset-bar">
@@ -2704,7 +2689,7 @@ function TemplatesPage({ state, month, save, confirmAction }: PageProps) {
                 <div className="grid gap-3 md:grid-cols-2"><Field label="工作形式"><Input value="无需填写" disabled /></Field><Field label="补全权重"><Input type="number" min={1} max={20} value={draft.weight} onChange={(e) => setDraft({ ...draft, weight: clampTemplateWeight(Number(e.target.value)) })} /></Field></div>
               )}
               <Field label="备注备选"><Textarea value={draft.remark} onChange={(e) => setDraft({ ...draft, remark: e.target.value })} placeholder="每行一个常用备注" /></Field>
-              <Field label="类型"><Select value={draft.scheduleKind} onChange={(e) => setDraft({ ...draft, scheduleKind: e.target.value as WorkTemplate["scheduleKind"] })}><option value="random">随机模板</option><option value="fixed">固定安排</option><option value="weekend_lecture">周末讲堂</option></Select></Field>
+              <Field label="类型"><Select value={draft.scheduleKind} onChange={(e) => setDraft({ ...draft, scheduleKind: e.target.value as WorkTemplate["scheduleKind"], weekday: e.target.value === "weekend_lecture" ? 6 : draft.weekday })}><option value="random">随机模板</option><option value="fixed">固定安排</option><option value="weekend_lecture">周末讲堂</option></Select></Field>
               {draft.scheduleKind !== "random" ? <div className="grid gap-3 md:grid-cols-3"><Field label="周几"><Input type="number" min={1} max={7} value={draft.weekday} onChange={(e) => setDraft({ ...draft, weekday: Number(e.target.value) })} /></Field><Field label="开始"><Input type="time" value={draft.startTime} onChange={(e) => setDraft({ ...draft, startTime: e.target.value })} /></Field><Field label="结束"><Input type="time" value={draft.endTime} onChange={(e) => setDraft({ ...draft, endTime: e.target.value })} /></Field></div> : null}
               {formError ? <div className="rounded-lg border border-red-500/20 bg-red-500/10 px-3 py-2 text-sm text-red-600 dark:text-red-300">{formError}</div> : null}
               <div className="flex gap-2">
@@ -2755,6 +2740,8 @@ function TemplateEditorModal({
   const remarkOptions = [...new Set(draft.remark.split(/\r?\n/).map((line) => line.trim()).filter(Boolean))].slice(0, 12);
 
   const submit = async () => {
+    const scheduleError = templateScheduleError(draft);
+    if (scheduleError) { setFormError(scheduleError); return; }
     if (projectRequired && (!draft.projectName || draft.projectName === "备注" || !projectExists(projects, draft.projectName))) {
       setFormError("这个工作类别必须选择项目库中的具体项目。");
       return;
@@ -2803,7 +2790,7 @@ function TemplateEditorModal({
             <Field label="补全权重"><Input type="number" min={1} max={20} value={draft.weight} onChange={(event) => setDraft({ ...draft, weight: clampTemplateWeight(Number(event.target.value)) })} /></Field>
           </div>
           <Field label="备注备选"><Textarea value={draft.remark} onChange={(event) => setDraft({ ...draft, remark: event.target.value })} placeholder="每行一个常用备注" /></Field>
-          <Field label="类型"><Select value={draft.scheduleKind} onChange={(event) => setDraft({ ...draft, scheduleKind: event.target.value as WorkTemplate["scheduleKind"] })}><option value="random">随机模板</option><option value="fixed">固定安排</option><option value="weekend_lecture">周末讲堂</option></Select></Field>
+          <Field label="类型"><Select value={draft.scheduleKind} onChange={(event) => setDraft({ ...draft, scheduleKind: event.target.value as WorkTemplate["scheduleKind"], weekday: event.target.value === "weekend_lecture" ? 6 : draft.weekday })}><option value="random">随机模板</option><option value="fixed">固定安排</option><option value="weekend_lecture">周末讲堂</option></Select></Field>
           {draft.scheduleKind !== "random" ? (
             <div className="grid grid-cols-3 gap-3">
               <Field label="周几"><Input type="number" min={1} max={7} value={draft.weekday} onChange={(event) => setDraft({ ...draft, weekday: Number(event.target.value) })} /></Field>

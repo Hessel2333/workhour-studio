@@ -1,3 +1,6 @@
+mod webdav;
+mod workspace_db;
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     tauri::Builder::default()
@@ -5,6 +8,14 @@ pub fn run() {
         .plugin(tauri_plugin_fs::init())
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_sql::Builder::default().build())
+        .invoke_handler(tauri::generate_handler![
+            workspace_db::save_workspace_batch,
+            webdav::test_webdav_connection,
+            webdav::store_webdav_password,
+            webdav::delete_webdav_password,
+            webdav::webdav_get_file,
+            webdav::webdav_put_file,
+        ])
         .setup(|app| {
             #[cfg(desktop)]
             app.handle()

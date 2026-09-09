@@ -1,8 +1,9 @@
 {
   "name": "workhour-studio",
-  "version": "0.2.3",
+  "version": "0.2.4",
   "description": "Local-first timesheet studio for maintaining projects, templates, schedules, and Excel-compatible workhour records.",
   "scripts": {
+    "test": "node tests/regression.test.mjs",
     "dev": "vite",
     "build": "node node_modules/typescript/bin/tsc && vite build",
     "preview": "vite preview",

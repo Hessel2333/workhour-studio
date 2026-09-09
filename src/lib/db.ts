@@ -1,4 +1,6 @@
 import Database from "@tauri-apps/plugin-sql";
+import { invoke } from "@tauri-apps/api/core";
+import { validateWorkspace } from "../data/validateWorkspace";
 import { createSeedState, defaultProfile } from "../data/defaults";
 import { migrations } from "../data/migrations";
 import type {
@@ -16,10 +18,14 @@ import type {
 } from "../data/types";
 
 type SqlDb = Awaited<ReturnType<typeof Database.load>>;
+type SqlExecutor = Pick<SqlDb, "select" | "execute">;
+type Statement = { query: string; values: unknown[] };
 
 const STORAGE_KEY = "workhour-studio.workspace";
 
 let sqlDb: SqlDb | null | undefined;
+let initialization: Promise<SqlDb | null> | undefined;
+let writes: Promise<unknown> = Promise.resolve();
 
 const now = () => new Date().toISOString();
 
@@ -51,7 +57,7 @@ function parsePresetSettings(value: unknown): TemplatePresetSetting[] {
   }
 }
 
-async function hasColumn(db: SqlDb, table: string, column: string) {
+async function hasColumn(db: SqlExecutor, table: string, column: string) {
   const rows = await db.select<Array<{ name?: string }>>(`PRAGMA table_info(${table})`);
   return rows.some((row) => row.name === column);
 }
@@ -180,35 +186,50 @@ const mapJob = (row: Record<string, unknown>): ImportExportJob => ({
 
 const canUseTauri = () => Boolean("__TAURI_INTERNALS__" in window);
 
-async function getSqlDb() {
+async function getSqlDb(): Promise<SqlDb | null> {
   if (sqlDb !== undefined) return sqlDb;
-  if (!canUseTauri()) {
-    sqlDb = null;
-    return sqlDb;
-  }
-  try {
-    sqlDb = await Database.load("sqlite:workhour-studio.db");
-    for (const migration of migrations) {
-      await sqlDb.execute(migration);
+  if (!canUseTauri()) return (sqlDb = null);
+  if (initialization) return initialization;
+  initialization = (async () => {
+    try {
+      const db = await Database.load("sqlite:workhour-studio.db");
+      for (const migration of migrations) await db.execute(migration);
+      for (const [table, column, definition] of [
+        ["work_templates", "remark_options", "TEXT"],
+        ["work_templates", "archived", "INTEGER NOT NULL DEFAULT 0"],
+        ["projects", "remark", "TEXT"],
+        ["projects", "owner_scope", "TEXT NOT NULL DEFAULT 'self'"],
+      ]) {
+        if (!(await hasColumn(db, table, column))) await db.execute(`ALTER TABLE ${table} ADD COLUMN ${column} ${definition}`);
+      }
+      sqlDb = db;
+      return db;
+    } catch (error) {
+      throw new Error(`无法打开本地 SQLite 数据库。原数据未改为浏览器存储，请关闭应用后重试。${String(error)}`);
+    } finally {
+      initialization = undefined;
     }
-    if (!(await hasColumn(sqlDb, "work_templates", "remark_options"))) {
-      await sqlDb.execute("ALTER TABLE work_templates ADD COLUMN remark_options TEXT");
-    }
-    if (!(await hasColumn(sqlDb, "work_templates", "archived"))) {
-      await sqlDb.execute("ALTER TABLE work_templates ADD COLUMN archived INTEGER NOT NULL DEFAULT 0");
-    }
-    if (!(await hasColumn(sqlDb, "projects", "remark"))) {
-      await sqlDb.execute("ALTER TABLE projects ADD COLUMN remark TEXT");
-    }
-    if (!(await hasColumn(sqlDb, "projects", "owner_scope"))) {
-      await sqlDb.execute("ALTER TABLE projects ADD COLUMN owner_scope TEXT NOT NULL DEFAULT 'self'");
-    }
-    return sqlDb;
-  } catch (error) {
-    console.warn("SQLite unavailable, using browser storage fallback.", error);
-    sqlDb = null;
-    return sqlDb;
-  }
+  })();
+  return initialization;
+}
+
+function enqueueWrite<T>(work: () => Promise<T>): Promise<T> {
+  const pending = writes.then(work);
+  writes = pending.catch(() => undefined);
+  return pending;
+}
+
+async function atomicWrite(db: SqlDb, work: (writer: SqlExecutor) => Promise<void>) {
+  const statements: Statement[] = [];
+  const writer: SqlExecutor = {
+    select: (query, values) => db.select(query, values),
+    execute: async (query, values = []) => {
+      statements.push({ query, values });
+      return { rowsAffected: 0, lastInsertId: 0 };
+    },
+  };
+  await work(writer);
+  if (statements.length) await invoke("save_workspace_batch", { statements });
 }
 
 const loadFallback = () => {
@@ -224,11 +245,11 @@ const loadFallback = () => {
 const saveFallback = (state: WorkspaceState) => localStorage.setItem(STORAGE_KEY, JSON.stringify(state));
 
 async function syncCollection<T extends { id: string }>(
-  db: SqlDb,
+  db: SqlExecutor,
   table: string,
   currentItems: T[] | undefined,
   nextItems: T[],
-  upsert: (item: T) => Promise<void>,
+  upsert: (item: T, db?: SqlExecutor) => Promise<void>,
 ) {
   const currentById = new Map((currentItems || []).map((item) => [item.id, item]));
   const nextById = new Map(nextItems.map((item) => [item.id, item]));
@@ -242,7 +263,7 @@ async function syncCollection<T extends { id: string }>(
   await Promise.all(
     nextItems
       .filter((item) => JSON.stringify(currentById.get(item.id)) !== JSON.stringify(item))
-      .map(upsert),
+      .map((item) => upsert(item, db)),
   );
 }
 
@@ -280,42 +301,36 @@ export async function loadWorkspace(): Promise<WorkspaceState> {
   };
 }
 
-export async function replaceWorkspace(state: WorkspaceState) {
-  const db = await getSqlDb();
-  if (!db) {
-    saveFallback(state);
-    return;
-  }
-
-  await db.execute("DELETE FROM project_aliases");
-  await db.execute("DELETE FROM time_blocks");
-  await db.execute("DELETE FROM timesheet_entries");
-  await db.execute("DELETE FROM monthly_template_settings");
-  await db.execute("DELETE FROM template_presets");
-  await db.execute("DELETE FROM work_templates");
-  await db.execute("DELETE FROM projects");
-  await db.execute("DELETE FROM import_exports");
-  await db.execute("DELETE FROM profiles");
-
-  await upsertProfile(state.profile);
-  await Promise.all(state.projects.map(upsertProject));
-  await Promise.all(state.aliases.map(upsertAlias));
-  await Promise.all(state.templates.map(upsertTemplate));
-  await Promise.all((state.monthlyTemplateSettings || []).map(upsertMonthlyTemplateSetting));
-  await Promise.all((state.templatePresets || []).map(upsertTemplatePreset));
-  await Promise.all(state.blocks.map(upsertBlock));
-  await Promise.all(state.entries.map(upsertEntry));
-  await Promise.all(state.jobs.map(upsertJob));
+export function replaceWorkspace(state: WorkspaceState) {
+  const validated = validateWorkspace(state);
+  return enqueueWrite(async () => {
+    const db = await getSqlDb();
+    if (!db) { saveFallback(validated); return; }
+    await atomicWrite(db, async (writer) => {
+      for (const table of ["project_aliases", "time_blocks", "timesheet_entries", "monthly_template_settings", "template_presets", "work_templates", "projects", "import_exports", "profiles"]) {
+        await writer.execute(`DELETE FROM ${table}`);
+      }
+      const empty = { ...validated, projects: [], aliases: [], templates: [], monthlyTemplateSettings: [], templatePresets: [], blocks: [], entries: [], jobs: [] };
+      await writePatch(validated, empty, writer);
+    });
+  });
 }
 
-export async function saveStatePatch(patch: Partial<WorkspaceState>, current: WorkspaceState) {
-  const next = { ...current, ...patch };
-  const db = await getSqlDb();
-  if (!db) {
-    saveFallback(next);
+export function saveStatePatch(patch: Partial<WorkspaceState>, current: WorkspaceState) {
+  return enqueueWrite(async () => {
+    const next = { ...current, ...patch };
+    const db = await getSqlDb();
+    if (!db) { saveFallback(next); return next; }
+    await atomicWrite(db, (writer) => writePatch(patch, current, writer));
     return next;
+  });
+}
+
+async function writePatch(patch: Partial<WorkspaceState>, current: WorkspaceState, db: SqlExecutor) {
+  if (patch.profile) {
+    await db.execute("DELETE FROM profiles WHERE id <> ?", [patch.profile.id]);
+    await upsertProfile(patch.profile, db);
   }
-  if (patch.profile) await upsertProfile(patch.profile);
   if (patch.projects) {
     await syncCollection(db, "projects", current.projects, patch.projects, upsertProject);
   }
@@ -340,11 +355,10 @@ export async function saveStatePatch(patch: Partial<WorkspaceState>, current: Wo
   if (patch.jobs) {
     await syncCollection(db, "import_exports", current.jobs, patch.jobs, upsertJob);
   }
-  return next;
 }
 
-export async function upsertProfile(profile: Profile) {
-  const db = await getSqlDb();
+export async function upsertProfile(profile: Profile, database?: SqlExecutor) {
+  const db = database ?? await getSqlDb();
   if (!db) return;
   const values = [
     profile.id,
@@ -375,8 +389,8 @@ export async function upsertProfile(profile: Profile) {
   );
 }
 
-export async function upsertProject(project: Project) {
-  const db = await getSqlDb();
+export async function upsertProject(project: Project, database?: SqlExecutor) {
+  const db = database ?? await getSqlDb();
   if (!db) return;
   await db.execute(
     `INSERT OR REPLACE INTO projects (id, name, code, category, remark, owner_scope, status, begin_date, end_date, source, is_favorite, created_at, updated_at)
@@ -399,8 +413,8 @@ export async function upsertProject(project: Project) {
   );
 }
 
-export async function upsertAlias(alias: ProjectAlias) {
-  const db = await getSqlDb();
+export async function upsertAlias(alias: ProjectAlias, database?: SqlExecutor) {
+  const db = database ?? await getSqlDb();
   if (!db) return;
   await db.execute(
     `INSERT OR REPLACE INTO project_aliases (id, project_id, alias, match_mode, created_at) VALUES (?, ?, ?, ?, ?)`,
@@ -408,8 +422,8 @@ export async function upsertAlias(alias: ProjectAlias) {
   );
 }
 
-export async function upsertTemplate(template: WorkTemplate) {
-  const db = await getSqlDb();
+export async function upsertTemplate(template: WorkTemplate, database?: SqlExecutor) {
+  const db = database ?? await getSqlDb();
   if (!db) return;
   await db.execute(
     `INSERT OR REPLACE INTO work_templates
@@ -439,8 +453,8 @@ export async function upsertTemplate(template: WorkTemplate) {
   );
 }
 
-export async function upsertMonthlyTemplateSetting(setting: MonthlyTemplateSetting) {
-  const db = await getSqlDb();
+export async function upsertMonthlyTemplateSetting(setting: MonthlyTemplateSetting, database?: SqlExecutor) {
+  const db = database ?? await getSqlDb();
   if (!db) return;
   await db.execute(
     `INSERT OR REPLACE INTO monthly_template_settings
@@ -458,8 +472,8 @@ export async function upsertMonthlyTemplateSetting(setting: MonthlyTemplateSetti
   );
 }
 
-export async function upsertTemplatePreset(preset: TemplatePreset) {
-  const db = await getSqlDb();
+export async function upsertTemplatePreset(preset: TemplatePreset, database?: SqlExecutor) {
+  const db = database ?? await getSqlDb();
   if (!db) return;
   await db.execute(
     `INSERT OR REPLACE INTO template_presets
@@ -475,8 +489,8 @@ export async function upsertTemplatePreset(preset: TemplatePreset) {
   );
 }
 
-export async function upsertBlock(block: TimeBlock) {
-  const db = await getSqlDb();
+export async function upsertBlock(block: TimeBlock, database?: SqlExecutor) {
+  const db = database ?? await getSqlDb();
   if (!db) return;
   await db.execute(
     `INSERT OR REPLACE INTO time_blocks
@@ -498,8 +512,8 @@ export async function upsertBlock(block: TimeBlock) {
   );
 }
 
-export async function upsertEntry(entry: TimesheetEntry) {
-  const db = await getSqlDb();
+export async function upsertEntry(entry: TimesheetEntry, database?: SqlExecutor) {
+  const db = database ?? await getSqlDb();
   if (!db) return;
   await db.execute(
     `INSERT OR REPLACE INTO timesheet_entries
@@ -526,8 +540,8 @@ export async function upsertEntry(entry: TimesheetEntry) {
   );
 }
 
-export async function upsertJob(job: ImportExportJob) {
-  const db = await getSqlDb();
+export async function upsertJob(job: ImportExportJob, database?: SqlExecutor) {
+  const db = database ?? await getSqlDb();
   if (!db) return;
   await db.execute(
     `INSERT OR REPLACE INTO import_exports

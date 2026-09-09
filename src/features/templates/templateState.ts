@@ -8,6 +8,15 @@ export const clampTemplateWeight = (weight: number) => Math.min(20, Math.max(1, 
 export const requiresLinkedProject = (workCategory: string) => projectRequiredCategories.has(workCategory);
 export const isCommonTemplate = (template: Pick<WorkTemplate, "enabled" | "archived">) => template.enabled && !template.archived;
 
+export function templateScheduleError(template: Pick<WorkTemplate, "scheduleKind" | "weekday" | "startTime" | "endTime">) {
+  if (template.scheduleKind === "random") return "";
+  if (!Number.isInteger(template.weekday) || template.weekday! < 1 || template.weekday! > 7) return "请选择有效的星期（1 至 7）。";
+  const validTime = (value?: string) => Boolean(value && /^([01]\d|2[0-3]):[0-5]\d$/.test(value));
+  if (!validTime(template.startTime) || !validTime(template.endTime)) return "请填写有效的开始和结束时间。";
+  if (template.endTime! <= template.startTime!) return "结束时间需要晚于开始时间。";
+  return "";
+}
+
 export function projectExists(projects: Project[], projectName?: string) {
   if (!projectName || projectName === "备注") return true;
   return projects.some((project) => project.name === projectName);

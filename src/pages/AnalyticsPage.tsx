@@ -1,6 +1,6 @@
 import { ChartPie, ChevronLeft, ChevronRight } from "lucide-react";
 import { useState } from "react";
-import { BreakdownPieChart, TrendBarChart } from "../components/Chart";
+import { BreakdownPieChart, TrendBarChart } from "../components/LazyCharts";
 import { Badge } from "../components/ui/Badge";
 import { Card, CardHeader } from "../components/ui/Card";
 import { EmptyState } from "../components/ui/EmptyState";
